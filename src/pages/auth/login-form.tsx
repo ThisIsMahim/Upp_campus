@@ -1,86 +1,114 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../../contexts/auth-context';
-import { Button } from '../../components/ui/button';
-import { toast } from '../../hooks/use-toast';
+"use client"
 
-export function LoginForm() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const { signIn, loading } = useAuth();
+import type React from "react"
+
+import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
+import { useAuth } from "../../contexts/auth-context"
+import { Button } from "../../components/ui/button"
+import { Input } from "../../components/ui/input"
+import { toast } from "../../hooks/use-toast"
+
+export default function LoginForm() {
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { signIn, isAuthenticated } = useAuth()
+  const navigate = useNavigate()
+
+  // Add effect to redirect when authentication state changes
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/feed")
+    }
+  }, [isAuthenticated, navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+    e.preventDefault()
+
     if (!email || !password) {
       toast({
-        title: "Missing fields",
-        description: "Please fill in all fields",
+        title: "Missing Fields",
+        description: "Please fill in all required fields.",
         variant: "destructive",
-      });
-      return;
+      })
+      return
     }
-    
-    await signIn(email, password);
-  };
+
+    try {
+      setIsSubmitting(true)
+      await signIn(email, password)
+      // The redirect will happen in the useEffect above
+    } catch (error) {
+      console.error("Login error:", error)
+      // Error is already handled in the auth context
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   return (
-    <div className="w-full max-w-md p-8 space-y-8 bg-white rounded-lg shadow-md">
+    <div className="w-full max-w-md mx-auto p-6 space-y-6">
       <div className="text-center">
-        <h1 className="text-2xl font-bold">Sign In</h1>
-        <p className="mt-2 text-gray-600">Welcome back to UPP Campus</p>
+        <h1 className="text-2xl font-bold">Welcome Back</h1>
+        <p className="text-sm text-muted-foreground mt-2">Enter your credentials to access your account</p>
       </div>
-      
-      <form onSubmit={handleSubmit} className="mt-8 space-y-6">
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <label htmlFor="email" className="text-sm font-medium">
             Email
           </label>
-          <input
+          <Input
             id="email"
-            name="email"
             type="email"
-            required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 mt-1 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            placeholder="your@email.com"
+            placeholder="name@example.com"
+            required
           />
         </div>
-        
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-            Password
-          </label>
-          <input
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor="password" className="text-sm font-medium">
+              Password
+            </label>
+            <a href="#" className="text-sm text-primary hover:underline">
+              Forgot password?
+            </a>
+          </div>
+          <Input
             id="password"
-            name="password"
             type="password"
-            required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3 py-2 mt-1 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             placeholder="••••••••"
+            required
           />
         </div>
-        
-        <Button 
-          type="submit" 
-          className="w-full"
-          disabled={loading}
-        >
-          {loading ? 'Signing in...' : 'Sign In'}
+
+        <Button type="submit" className="w-full" disabled={isSubmitting}>
+          {isSubmitting ? "Signing in..." : "Sign In"}
         </Button>
       </form>
-      
-      <div className="mt-4 text-center">
-        <p className="text-sm text-gray-600">
-          Don't have an account?{' '}
-          <Link to="/auth/signup" className="font-medium text-indigo-600 hover:text-indigo-500">
+
+      <div className="text-center text-sm">
+        <p>
+          Don't have an account?{" "}
+          <a
+            href="/auth/signup"
+            className="text-primary hover:underline"
+            onClick={(e) => {
+              e.preventDefault()
+              navigate("/auth/signup")
+            }}
+          >
             Sign up
-          </Link>
+          </a>
         </p>
       </div>
     </div>
-  );
+  )
 }
+

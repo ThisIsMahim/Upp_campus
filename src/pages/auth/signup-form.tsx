@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../../contexts/auth-context"
 import { Button } from "../../components/ui/button"
@@ -20,8 +20,15 @@ export default function SignupForm() {
     avatar_url: "",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const { signUp } = useAuth()
+  const { signUp, isAuthenticated } = useAuth()
   const navigate = useNavigate()
+
+  // Add effect to redirect when authentication state changes
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/feed")
+    }
+  }, [isAuthenticated, navigate])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -67,7 +74,7 @@ export default function SignupForm() {
         bio: formData.bio || null,
         avatar_url: formData.avatar_url || null,
       })
-      navigate("/feed")
+      // The redirect will happen in the useEffect above
     } catch (error) {
       console.error("Signup error:", error)
       // Error is already handled in the auth context
