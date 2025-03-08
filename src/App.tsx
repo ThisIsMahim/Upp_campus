@@ -6,6 +6,7 @@ import { Toaster } from "./components/ui/toaster"
 import { AuthProvider, useAuth } from "./contexts/auth-context"
 import Layout from "./components/layout"
 import { useEffect } from "react"
+import { checkTablesSetup } from "./lib/check-tables-setup"
 
 // Pages
 import AuthPage from "./pages/auth/index"
@@ -139,6 +140,17 @@ function AppRoutes() {
 }
 
 export default function App() {
+  useEffect(() => {
+    // Check if database tables are set up correctly
+    checkTablesSetup()
+      .then((success) => {
+        console.log("Database tables setup check completed:", success ? "OK" : "Failed")
+      })
+      .catch((error) => {
+        console.error("Error during database tables setup check:", error)
+      })
+  }, [])
+
   return (
     <AuthProvider>
       <AppRoutes />

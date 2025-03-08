@@ -10,7 +10,7 @@ import { Input } from "../../components/ui/input"
 import { Textarea } from "../../components/ui/textarea"
 import { Button } from "../../components/ui/button"
 import { toast } from "../../hooks/use-toast"
-import type { Profile } from "../../types"
+import type { Profile, Campus } from "../../types"
 
 export default function ProfilePage() {
   const { user, session } = useAuth()
@@ -21,10 +21,22 @@ export default function ProfilePage() {
   const [isSaving, setIsSaving] = useState(false)
   const [debugInfo, setDebugInfo] = useState<any>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Campus related state
+  const [campuses, setCampuses] = useState<Campus[]>([])
+  const [isLoadingCampuses, setIsLoadingCampuses] = useState(true)
+  const [isNewCampusDialogOpen, setIsNewCampusDialogOpen] = useState(false)
+  const [newCampusData, setNewCampusData] = useState({
+    name: "",
+    short_name: "",
+    description: "",
+  })
+
   const [formData, setFormData] = useState({
     username: "",
     bio: "",
     avatar_url: "",
+    campus_id: "",
   })
 
   // Function to manually create a profile
@@ -42,11 +54,13 @@ export default function ProfilePage() {
       setIsLoading(true)
       const username = user.user_metadata?.username || user.email?.split("@")[0] || "User"
       const email = user.email || ""
+      const campus_id = user.user_metadata?.campus_id || null
 
       console.log("Manually creating profile with data:", {
         id: user.id,
         username,
         email,
+        campus_id,
       })
 
       const { data, error } = await supabase
@@ -56,6 +70,7 @@ export default function ProfilePage() {
             id: user.id,
             username,
             email,
+            campus_id,
             created_at: new Date().toISOString(),
           },
         ])
@@ -86,6 +101,7 @@ export default function ProfilePage() {
           username: data.username || "",
           bio: data.bio || "",
           avatar_url: data.avatar_url || "",
+          campus_id: data.campus_id || "",
         })
         toast({
           title: "Profile Created",
@@ -107,6 +123,25 @@ export default function ProfilePage() {
     // Clear any existing timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
+    }
+
+    async function loadCampuses() {
+      try {
+        setIsLoadingCampuses(true)
+        const { data, error } = await supabase.from("campuses").select("*").order("name")
+
+        if (error) throw error
+
+        if (isMounted) {
+          setCampuses(data || [])
+        }
+      } catch (error) {
+        console.error("Error loading campuses:", error)
+      } finally {
+        if (isMounted) {
+          setIsLoadingCampuses(false)
+        }
+      }
     }
 
     async function loadProfile() {
@@ -205,6 +240,7 @@ export default function ProfilePage() {
             username: data.username || "",
             bio: data.bio || "",
             avatar_url: data.avatar_url || "",
+            campus_id: data.campus_id || "",
           })
         }
       } catch (error) {
@@ -221,6 +257,7 @@ export default function ProfilePage() {
       }
     }
 
+    loadCampuses()
     loadProfile()
 
     return () => {
@@ -232,12 +269,83 @@ export default function ProfilePage() {
     }
   }, [user, session])
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({
       ...prev,
       [name]: value,
     }))
+  }
+
+  const handleNewCampusChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target
+    setNewCampusData((prev) => ({
+      ...prev,
+      [name]: value,
+    }))
+  }
+
+  const handleCreateCampus = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!newCampusData.name) {
+      toast({
+        title: "Missing Information",
+        description: "Campus name is required.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setIsSaving(true)
+
+      const { data, error } = await supabase
+        .from("campuses")
+        .insert([
+          {
+            name: newCampusData.name,
+            short_name: newCampusData.short_name || null,
+            description: newCampusData.description || null,
+            created_by: user?.id || null,
+          },
+        ])
+        .select()
+        .single()
+
+      if (error) {
+        throw error
+      }
+
+      // Add the new campus to the list and select it
+      setCampuses((prev) => [...prev, data])
+      setFormData((prev) => ({
+        ...prev,
+        campus_id: data.id,
+      }))
+
+      toast({
+        title: "Campus Created",
+        description: `${newCampusData.name} has been added successfully.`,
+        variant: "success",
+      })
+
+      setIsNewCampusDialogOpen(false)
+      setNewCampusData({
+        name: "",
+        short_name: "",
+        description: "",
+      })
+    } catch (error) {
+      console.error("Error creating campus:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to create campus.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -248,7 +356,7 @@ export default function ProfilePage() {
     try {
       setIsSaving(true)
 
-      // Validate username
+      // Validate username and campus
       if (!formData.username.trim()) {
         toast({
           title: "Error",
@@ -258,10 +366,20 @@ export default function ProfilePage() {
         return
       }
 
+      if (!formData.campus_id) {
+        toast({
+          title: "Error",
+          description: "Please select a campus",
+          variant: "destructive",
+        })
+        return
+      }
+
       const updates = {
         username: formData.username,
         bio: formData.bio || null,
         avatar_url: formData.avatar_url || null,
+        campus_id: formData.campus_id,
         updated_at: new Date().toISOString(),
       }
 
@@ -360,6 +478,8 @@ export default function ProfilePage() {
     )
   }
 
+  const currentCampus = campuses.find((c) => c.id === profile.campus_id)
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-2xl mx-auto">
@@ -392,6 +512,22 @@ export default function ProfilePage() {
             </div>
           )}
 
+          {profile.campus_id && (
+            <div>
+              <h2 className="text-lg font-semibold mb-2">Campus</h2>
+              <p className="text-gray-700">
+                {currentCampus ? (
+                  <>
+                    {currentCampus.name}
+                    {currentCampus.short_name && ` (${currentCampus.short_name})`}
+                  </>
+                ) : (
+                  "Unknown Campus"
+                )}
+              </p>
+            </div>
+          )}
+
           <div className="pt-6 border-t">
             <button
               className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
@@ -419,6 +555,33 @@ export default function ProfilePage() {
               placeholder="johndoe"
               required
             />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="campus_id" className="text-sm font-medium">
+              Campus<span className="text-red-500">*</span>
+            </label>
+            <div className="flex gap-2">
+              <select
+                id="campus_id"
+                name="campus_id"
+                value={formData.campus_id}
+                onChange={handleChange}
+                className="w-full p-2 border rounded-md"
+                required
+                disabled={isLoadingCampuses}
+              >
+                <option value="">Select a campus</option>
+                {campuses.map((campus) => (
+                  <option key={campus.id} value={campus.id}>
+                    {campus.name} {campus.short_name ? `(${campus.short_name})` : ""}
+                  </option>
+                ))}
+              </select>
+              <Button type="button" onClick={() => setIsNewCampusDialogOpen(true)} className="whitespace-nowrap">
+                Add New
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -482,6 +645,72 @@ export default function ProfilePage() {
               disabled={isSaving}
             >
               {isSaving ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* New Campus Dialog */}
+      <Dialog isOpen={isNewCampusDialogOpen} onClose={() => setIsNewCampusDialogOpen(false)} title="Add New Campus">
+        <form onSubmit={handleCreateCampus} className="space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="name" className="text-sm font-medium">
+              Campus Name<span className="text-red-500">*</span>
+            </label>
+            <Input
+              id="name"
+              name="name"
+              type="text"
+              value={newCampusData.name}
+              onChange={handleNewCampusChange}
+              placeholder="e.g. Harvard University"
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="short_name" className="text-sm font-medium">
+              Short Name/Abbreviation (optional)
+            </label>
+            <Input
+              id="short_name"
+              name="short_name"
+              type="text"
+              value={newCampusData.short_name}
+              onChange={handleNewCampusChange}
+              placeholder="e.g. HU"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="description" className="text-sm font-medium">
+              Description (optional)
+            </label>
+            <Textarea
+              id="description"
+              name="description"
+              value={newCampusData.description}
+              onChange={handleNewCampusChange}
+              placeholder="Brief description of the campus..."
+              rows={3}
+            />
+          </div>
+
+          <div className="flex space-x-2 pt-4">
+            <Button
+              type="button"
+              className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+              onClick={() => setIsNewCampusDialogOpen(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+              disabled={isSaving}
+            >
+              {isSaving ? "Creating..." : "Create Campus"}
             </Button>
           </div>
         </form>

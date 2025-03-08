@@ -20,6 +20,7 @@ interface AuthContextType {
     profileData?: {
       bio?: string | null
       avatar_url?: string | null
+      campus_id?: string | null
     },
   ) => Promise<void>
   signOut: () => Promise<void>
@@ -112,12 +113,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.log("No profile found after sign in, creating one...")
             const username = newSession.user.user_metadata.username || "user"
             const email = newSession.user.email || ""
+            const campus_id = newSession.user.user_metadata.campus_id || null
 
             const { error } = await supabaseClient.from("profiles").insert([
               {
                 id: newSession.user.id,
                 username,
                 email,
+                campus_id,
                 created_at: new Date().toISOString(),
               },
             ])
@@ -174,6 +177,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }
 
+  // Update the signUp function to include campus_id
   const signUp = async (
     email: string,
     password: string,
@@ -181,6 +185,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     profileData?: {
       bio?: string | null
       avatar_url?: string | null
+      campus_id?: string | null
     },
   ) => {
     try {
@@ -196,6 +201,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             username,
             ...(profileData?.bio && { bio: profileData.bio }),
             ...(profileData?.avatar_url && { avatar_url: profileData.avatar_url }),
+            ...(profileData?.campus_id && { campus_id: profileData.campus_id }),
           },
         },
       })
@@ -214,6 +220,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         description: "Your account has been successfully created.",
         variant: "success",
       })
+
+      setUser(authData.user)
+      setSession(authData.session)
+      setIsAuthenticated(true)
     } catch (error) {
       console.error("Sign up error:", error)
       updateAuthState(null)
@@ -249,6 +259,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Manually update state regardless of the outcome
       console.log("Manually updating auth state after sign out")
       updateAuthState(null)
+      // Manually reset the session
+    supabase.auth.setSession(null) 
+    window.location.reload() // Force a reload to clear state
 
       toast({
         title: "Signed Out",
