@@ -6,7 +6,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-.bolt
+*.bolt
+bolt
+prompt
 
 node_modules
 dist

@@ -1,12 +1,14 @@
 "use client"
 
 import type React from "react"
+import { useState, useEffect } from "react"
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom"
 import { Toaster } from "./components/ui/toaster"
 import { AuthProvider, useAuth } from "./contexts/auth-context"
 import Layout from "./components/layout"
-import { useEffect } from "react"
 import { checkTablesSetup } from "./lib/check-tables-setup"
+import { ForceRefresh } from "./components/force-refresh"
+import { checkAuthStatus } from "./lib/check-auth-status"
 
 // Pages
 import AuthPage from "./pages/auth/index"
@@ -140,21 +142,37 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const [tablesChecked, setTablesChecked] = useState(false)
+
   useEffect(() => {
-    // Check if database tables are set up correctly
-    checkTablesSetup()
-      .then((success) => {
-        console.log("Database tables setup check completed:", success ? "OK" : "Failed")
-      })
-      .catch((error) => {
-        console.error("Error during database tables setup check:", error)
-      })
-  }, [])
+    // Check if database tables are set up correctly, but only once
+    if (!tablesChecked) {
+      checkTablesSetup()
+        .then((success) => {
+          console.log("Database tables setup check completed:", success ? "OK" : "Failed")
+          setTablesChecked(true)
+        })
+        .catch((error) => {
+          console.error("Error during database tables setup check:", error)
+          setTablesChecked(true)
+        })
+
+      // Also check auth status
+      checkAuthStatus()
+        .then((isAuthenticated) => {
+          console.log("Auth status check completed:", isAuthenticated ? "Authenticated" : "Not authenticated")
+        })
+        .catch((error) => {
+          console.error("Error during auth status check:", error)
+        })
+    }
+  }, [tablesChecked])
 
   return (
     <AuthProvider>
       <AppRoutes />
       <Toaster />
+      <ForceRefresh />
     </AuthProvider>
   )
 }

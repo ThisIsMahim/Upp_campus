@@ -98,7 +98,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return
       }
 
-      updateAuthState(newSession)
+      // Only update if the session actually changed
+      if ((!session && newSession) || (session && !newSession) || session?.user?.id !== newSession?.user?.id) {
+        console.log("Session changed, updating auth state")
+        updateAuthState(newSession)
+      } else {
+        console.log("Session unchanged, skipping update")
+      }
 
       // If a user just signed in, try to create their profile
       if (event === "SIGNED_IN" && newSession?.user) {
@@ -141,7 +147,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.log("Cleaning up auth state change listener")
       subscription.unsubscribe()
     }
-  }, [supabaseClient, updateAuthState])
+  }, [supabaseClient, updateAuthState, session])
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -238,30 +244,50 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }
 
+  // Update the signOut function to clear local storage tokens
   const signOut = async () => {
     try {
       isSigningOutRef.current = true
       setIsLoading(true)
       console.log("Signing out...")
 
-      // Create a timeout to ensure the function doesn't hang
-      const signOutPromise = supabaseClient.auth.signOut()
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("Sign out timed out")), 2000)
-      })
+      // Clear ALL Supabase-related tokens from localStorage
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && (key.startsWith("sb-") || key.includes("sb"))) {
+          console.log(`Removing local storage item: ${key}`)
+          localStorage.removeItem(key)
+        }
+      }
 
-      // Race the sign out against the timeout
-      await Promise.race([signOutPromise, timeoutPromise]).catch((error) => {
-        console.warn("Sign out operation timed out or failed:", error)
+      // Also clear session storage
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i)
+        if (key && (key.startsWith("sb-") || key.includes("sb"))) {
+          console.log(`Removing session storage item: ${key}`)
+          sessionStorage.removeItem(key)
+        }
+      }
+
+      // Also attempt the normal sign out process
+      try {
+        const { error } = await supabaseClient.auth.signOut({ scope: "global" })
+        if (error) {
+          console.warn("Error during Supabase sign out:", error)
+          // Continue anyway, we've already cleared local storage
+        }
+      } catch (supabaseError) {
+        console.warn("Exception during Supabase sign out:", supabaseError)
         // Continue anyway
-      })
+      }
 
       // Manually update state regardless of the outcome
       console.log("Manually updating auth state after sign out")
-      updateAuthState(null)
-      // Manually reset the session
-    supabase.auth.setSession(null) 
-    window.location.reload() // Force a reload to clear state
+
+      // Force reset all auth state
+      setSession(null)
+      setUser(null)
+      setIsAuthenticated(false)
 
       toast({
         title: "Signed Out",
@@ -272,8 +298,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return Promise.resolve()
     } catch (error) {
       console.error("Sign out error:", error)
+
+      // Clear localStorage even in case of error
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && (key.startsWith("sb-") || key.includes("sb"))) {
+          console.log(`Removing local storage item: ${key}`)
+          localStorage.removeItem(key)
+        }
+      }
+
       // Still update the state even if there was an error
-      updateAuthState(null)
+      setSession(null)
+      setUser(null)
+      setIsAuthenticated(false)
 
       toast({
         title: "Sign Out Issue",

@@ -1,28 +1,32 @@
 "use client"
 
-import type React from "react"
-
 import { useState, useEffect } from "react"
 import { useAuth } from "../../contexts/auth-context"
 import { supabase } from "../../lib/supabase"
 import { Button } from "../../components/ui/button"
-import { Textarea } from "../../components/ui/textarea"
-import { toast } from "../../hooks/use-toast"
 import type { Profile, Campus } from "../../types"
+import { PostActions } from "../../components/post-actions"
+import { CommentsSection } from "../../components/comments-section"
+import { PostForm } from "../../components/post-form"
 
 export default function FeedPage() {
   const { user } = useAuth()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [posts, setPosts] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [userProfile, setUserProfile] = useState<Profile | null>(null)
-  const [content, setContent] = useState("")
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [currentCampus, setCurrentCampus] = useState<Campus | null>(null)
 
+  // Inside the FeedPage component, add state for likes and comments
+  const [showComments, setShowComments] = useState<string | null>(null)
+  const [postLikes, setPostLikes] = useState<Record<string, number>>({})
+  const [postComments, setPostComments] = useState<Record<string, number>>({})
+  const [userLikes, setUserLikes] = useState<Record<string, boolean>>({})
+
+  // Update the useEffect that loads user profile and posts
   useEffect(() => {
     let isMounted = true
+    let timeoutId: NodeJS.Timeout | null = null
 
     const loadUserProfileAndPosts = async () => {
       try {
@@ -30,10 +34,22 @@ export default function FeedPage() {
 
         if (!user?.id) {
           console.log("No user ID available for feed")
+          if (isMounted) {
+            setIsLoading(false)
+          }
           return
         }
 
         console.log("Loading user profile and posts for user:", user.id)
+
+        // Set a safety timeout to prevent infinite loading
+        timeoutId = setTimeout(() => {
+          if (isMounted) {
+            console.error("Feed loading timed out after 10 seconds")
+            setLoadError("Loading timed out. Please refresh the page.")
+            setIsLoading(false)
+          }
+        }, 10000)
 
         // Load user profile first to get campus_id
         const { data: profile, error: profileError } = await supabase
@@ -46,14 +62,15 @@ export default function FeedPage() {
           console.error("Error loading user profile:", profileError)
           if (isMounted) {
             setLoadError(`Failed to load profile: ${profileError.message}`)
+            setIsLoading(false)
           }
           return
         }
 
-        if (isMounted) {
-          console.log("User profile loaded:", profile)
-          setUserProfile(profile)
-        }
+        if (!isMounted) return
+
+        console.log("User profile loaded:", profile)
+        setUserProfile(profile)
 
         // Only load posts from user's campus
         if (profile.campus_id) {
@@ -70,96 +87,73 @@ export default function FeedPage() {
             console.error("Error loading campus:", campusError)
             if (isMounted) {
               setLoadError(`Failed to load campus: ${campusError.message}`)
+              setIsLoading(false)
             }
             return
           }
 
-          if (isMounted) {
-            console.log("Campus loaded:", campusData)
-            setCurrentCampus(campusData)
-          }
+          if (!isMounted) return
 
-          // Try different query approaches to load posts
+          console.log("Campus loaded:", campusData)
+          setCurrentCampus(campusData)
+
+          // Try loading posts with a simpler query
           try {
-            // Approach 1: Simple query without joins
-            console.log("Trying simple query approach...")
+            console.log("Loading posts...")
             const { data: postsData, error: postsError } = await supabase
               .from("posts")
               .select("*")
               .eq("campus_id", profile.campus_id)
               .order("created_at", { ascending: false })
+              .limit(20) // Add a limit to prevent too much data
 
             if (postsError) {
-              console.error("Error with simple query:", postsError)
+              console.error("Error loading posts:", postsError)
               throw postsError
             }
 
-            if (postsData && postsData.length > 0) {
-              console.log("Posts loaded with simple query:", postsData.length)
+            if (!isMounted) return
 
-              // Now fetch the related data separately
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const postIds = postsData.map((post) => post.id)
-              const userIds = postsData.map((post) => post.user_id)
-              const campusIds = postsData.map((post) => post.campus_id)
+            if (!postsData || postsData.length === 0) {
+              console.log("No posts found")
+              setPosts([])
+              setIsLoading(false)
+              if (timeoutId) clearTimeout(timeoutId)
+              return
+            }
 
-              // Get unique IDs
-              const uniqueUserIds = [...new Set(userIds)]
-              const uniqueCampusIds = [...new Set(campusIds)]
+            console.log("Posts loaded:", postsData.length)
 
-              // Fetch authors
-              const { data: authors, error: authorsError } = await supabase
-                .from("profiles")
-                .select("*")
-                .in("id", uniqueUserIds)
+            // Load author data in batches
+            const userIds = [...new Set(postsData.map((post) => post.user_id))]
+            const { data: authors, error: authorsError } = await supabase
+              .from("profiles")
+              .select("id, username, avatar_url")
+              .in("id", userIds)
 
-              if (authorsError) {
-                console.error("Error fetching authors:", authorsError)
-              }
+            if (authorsError) {
+              console.error("Error loading authors:", authorsError)
+            }
 
-              // Fetch campuses
-              const { data: campuses, error: campusesError } = await supabase
-                .from("campuses")
-                .select("*")
-                .in("id", uniqueCampusIds)
+            const authorMap = authors
+              ? authors.reduce((map, author) => {
+                  map[author.id] = author
+                  return map
+                }, {})
+              : {}
 
-              if (campusesError) {
-                console.error("Error fetching campuses:", campusesError)
-              }
+            // Combine the data
+            const enrichedPosts = postsData.map((post) => ({
+              ...post,
+              author: authorMap[post.user_id] || null,
+              campus: campusData,
+            }))
 
-              // Create a map for quick lookups
-              const authorMap = authors
-                ? authors.reduce((map, author) => {
-                    map[author.id] = author
-                    return map
-                  }, {})
-                : {}
-
-              const campusMap = campuses
-                ? campuses.reduce((map, campus) => {
-                    map[campus.id] = campus
-                    return map
-                  }, {})
-                : {}
-
-              // Combine the data
-              const enrichedPosts = postsData.map((post) => ({
-                ...post,
-                author: authorMap[post.user_id] || null,
-                campus: campusMap[post.campus_id] || null,
-              }))
-
-              if (isMounted) {
-                setPosts(enrichedPosts)
-              }
-            } else {
-              console.log("No posts found with simple query")
-              if (isMounted) {
-                setPosts([])
-              }
+            if (isMounted) {
+              setPosts(enrichedPosts)
             }
           } catch (error) {
-            console.error("Error loading posts:", error)
+            console.error("Error processing posts:", error)
             if (isMounted) {
               setLoadError(`Failed to load posts: ${error instanceof Error ? error.message : "Unknown error"}`)
             }
@@ -173,6 +167,7 @@ export default function FeedPage() {
           setLoadError(`An unexpected error occurred: ${error instanceof Error ? error.message : "Unknown error"}`)
         }
       } finally {
+        if (timeoutId) clearTimeout(timeoutId)
         if (isMounted) {
           setIsLoading(false)
         }
@@ -183,96 +178,62 @@ export default function FeedPage() {
 
     return () => {
       isMounted = false
+      if (timeoutId) clearTimeout(timeoutId)
     }
   }, [user?.id])
 
-  const handleSubmitPost = async (e: React.FormEvent) => {
-    e.preventDefault()
+  // Add this after loading posts in the useEffect
+  useEffect(() => {
+    const loadLikesAndComments = async () => {
+      if (!posts.length) return
 
-    if (!content.trim()) {
-      toast({
-        title: "Empty Post",
-        description: "Please enter some content for your post.",
-        variant: "destructive",
-      })
-      return
+      try {
+        // Load likes counts
+        const postIds = posts.map((post) => post.id)
+        const { data: likesData, error: likesError } = await supabase
+          .from("likes")
+          .select("likeable_id, user_id")
+          .eq("likeable_type", "post")
+          .in("likeable_id", postIds)
+
+        if (likesError) throw likesError
+
+        // Count likes per post and check user likes
+        const likesCount: Record<string, number> = {}
+        const userLiked: Record<string, boolean> = {}
+
+        likesData?.forEach((like) => {
+          likesCount[like.likeable_id] = (likesCount[like.likeable_id] || 0) + 1
+          if (like.user_id === user?.id) {
+            userLiked[like.likeable_id] = true
+          }
+        })
+
+        setPostLikes(likesCount)
+        setUserLikes(userLiked)
+
+        // Load comments counts
+        const { data: commentsData, error: commentsError } = await supabase
+          .from("comments")
+          .select("post_id")
+          .in("post_id", postIds)
+
+        if (commentsError) throw commentsError
+
+        // Count comments per post
+        const commentsCount: Record<string, number> = {}
+        commentsData?.forEach((comment) => {
+          commentsCount[comment.post_id] = (commentsCount[comment.post_id] || 0) + 1
+        })
+
+        setPostComments(commentsCount)
+      } catch (error) {
+        console.error("Error loading likes and comments:", error)
+      }
     }
 
-    if (!user?.id || !userProfile?.campus_id) {
-      toast({
-        title: "Error",
-        description: "You must be logged in and have a campus selected to post.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    try {
-      setIsSubmitting(true)
-
-      const newPost = {
-        user_id: user.id,
-        campus_id: userProfile.campus_id,
-        content,
-        created_at: new Date().toISOString(),
-      }
-
-      console.log("Creating new post:", newPost)
-
-      // Insert the post
-      const { data, error } = await supabase.from("posts").insert([newPost]).select("*").single()
-
-      if (error) throw error
-
-      console.log("Post created successfully:", data)
-
-      // Fetch the author and campus data
-      const { data: author, error: authorError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", data.user_id)
-        .single()
-
-      if (authorError) {
-        console.error("Error fetching author:", authorError)
-      }
-
-      const { data: campus, error: campusError } = await supabase
-        .from("campuses")
-        .select("*")
-        .eq("id", data.campus_id)
-        .single()
-
-      if (campusError) {
-        console.error("Error fetching campus:", campusError)
-      }
-
-      // Add the post to the state with author and campus
-      const enrichedPost = {
-        ...data,
-        author: author || null,
-        campus: campus || null,
-      }
-
-      setPosts((prev) => [enrichedPost, ...prev])
-      setContent("")
-
-      toast({
-        title: "Post Created",
-        description: "Your post has been published successfully.",
-        variant: "success",
-      })
-    } catch (error) {
-      console.error("Error creating post:", error)
-      toast({
-        title: "Post Failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+    loadLikesAndComments()
+  }, [posts, user?.id])
 
   if (isLoading) {
     return (
@@ -323,29 +284,15 @@ export default function FeedPage() {
       <h1 className="text-2xl font-bold mb-6">Feed - {campusName}</h1>
 
       {/* Create Post Form */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <form onSubmit={handleSubmitPost}>
-          <div className="mb-4">
-            <Textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="What's on your mind?"
-              rows={3}
-              className="w-full p-2 border rounded-md"
-              required
-            />
-          </div>
-          <div className="flex justify-end">
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="bg-primary text-white px-4 py-2 rounded hover:bg-primary/80"
-            >
-              {isSubmitting ? "Posting..." : "Post"}
-            </Button>
-          </div>
-        </form>
-      </div>
+      {userProfile && currentCampus && (
+        <PostForm
+          userProfile={userProfile}
+          currentCampus={currentCampus}
+          onPostCreated={(newPost) => {
+            setPosts((prev) => [newPost, ...prev])
+          }}
+        />
+      )}
 
       {/* Posts List */}
       <div className="space-y-4">
@@ -379,6 +326,40 @@ export default function FeedPage() {
                 </div>
               </div>
               <p className="text-gray-700 whitespace-pre-line">{post.content}</p>
+
+              <PostActions
+                postId={post.id}
+                likesCount={postLikes[post.id] || 0}
+                commentsCount={postComments[post.id] || 0}
+                isLiked={!!userLikes[post.id]}
+                onLikeChange={(liked) => {
+                  setPostLikes((prev) => ({
+                    ...prev,
+                    [post.id]: (prev[post.id] || 0) + (liked ? 1 : -1),
+                  }))
+                  setUserLikes((prev) => ({
+                    ...prev,
+                    [post.id]: liked,
+                  }))
+                }}
+                onCommentAdd={() => setShowComments(showComments === post.id ? null : post.id)}
+                canDelete={post.user_id === user?.id}
+                onDelete={() => {
+                  setPosts((prev) => prev.filter((p) => p.id !== post.id))
+                }}
+              />
+
+              {showComments === post.id && (
+                <CommentsSection
+                  postId={post.id}
+                  onCommentCountChange={(count) => {
+                    setPostComments((prev) => ({
+                      ...prev,
+                      [post.id]: count,
+                    }))
+                  }}
+                />
+              )}
             </div>
           ))
         )}
