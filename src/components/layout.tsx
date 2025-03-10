@@ -31,9 +31,7 @@ export default function Layout({ children }: LayoutProps) {
 
       // Call the signOut function from auth context
       await signOut()
-
-      // Force navigation to login page
-      window.location.href = "/auth/login"
+     
     } catch (error) {
       console.error("Error signing out:", error)
 
@@ -41,7 +39,7 @@ export default function Layout({ children }: LayoutProps) {
       clearSupabaseAuth()
 
       // Force redirect on error
-      window.location.href = "/auth/login"
+      navigate("/auth/login")
 
       toast({
         title: "Sign Out Issue",
@@ -59,8 +57,8 @@ export default function Layout({ children }: LayoutProps) {
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-8">
-              <Link to="/feed" className="text-primary font-semibold text-lg">
-                Your App
+              <Link to="/feed" className="text-primary font-bold text-lg">
+                Upp Campus
               </Link>
               <Link to="/feed" className="text-gray-700 hover:text-primary transition-colors">
                 Feed
