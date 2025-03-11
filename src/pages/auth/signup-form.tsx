@@ -168,9 +168,10 @@ export default function SignupForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    console.log("Form submission data:", formData)
+    // Trim the username to check if it's empty after trimming
+    const trimmedUsername = formData.username.trim()
 
-    if (!formData.email || !formData.password || !formData.username || !formData.campus_id) {
+    if (!formData.email || !formData.password || !trimmedUsername || !formData.campus_id) {
       toast({
         title: "Missing Fields",
         description: "Please fill in all required fields, including selecting a campus.",
@@ -197,12 +198,29 @@ export default function SignupForm() {
       return
     }
 
+    // Validate username format
+    if (trimmedUsername.length < 3) {
+      toast({
+        title: "Invalid Username",
+        description: "Username must be at least 3 characters long.",
+        variant: "destructive",
+      })
+      return
+    }
+
     try {
       setIsSubmitting(true)
-      await signUp(formData.email, formData.password, formData.username, {
-        bio: formData.bio || null,
-        avatar_url: formData.avatar_url || null,
-        campus_id: formData.campus_id,
+
+      // Update the form data with the trimmed username
+      const updatedFormData = {
+        ...formData,
+        username: trimmedUsername,
+      }
+
+      await signUp(updatedFormData.email, updatedFormData.password, updatedFormData.username, {
+        bio: updatedFormData.bio || null,
+        avatar_url: updatedFormData.avatar_url || null,
+        campus_id: updatedFormData.campus_id,
       })
       // The redirect will happen in the useEffect above
     } catch (error) {
@@ -214,7 +232,7 @@ export default function SignupForm() {
   }
 
   return (
-    <div className="w-full max-w-md mx-auto p-6 space-y-6 bg-white rounded-lg shadow-lg border border-border">
+    <div className="w-full max-w-md mx-auto p-6 space-y-6">
       <div className="text-center">
         <h1 className="text-2xl font-bold">Create an Account</h1>
         <p className="text-sm text-muted-foreground mt-2">Enter your details to create your account</p>

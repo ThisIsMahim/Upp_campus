@@ -198,13 +198,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsLoading(true)
       console.log("Starting sign up process...")
 
-      // Create auth user with metadata
+      // Validate username
+      if (!username || username.trim().length < 3) {
+        throw new Error("Username must be at least 3 characters long")
+      }
+
+      // First, create the auth user
       const { data: authData, error: authError } = await supabaseClient.auth.signUp({
         email,
         password,
         options: {
           data: {
-            username,
+            username: username.trim(),
             ...(profileData?.bio && { bio: profileData.bio }),
             ...(profileData?.avatar_url && { avatar_url: profileData.avatar_url }),
             ...(profileData?.campus_id && { campus_id: profileData.campus_id }),
@@ -219,7 +224,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       console.log("Auth user created:", authData.user.id)
-      // Auth state will be updated by the listener
+
+      // Use the database function to create the profile
+      const { error: profileError } = await supabaseClient.rpc("create_user_profile", {
+        user_id: authData.user.id,
+        user_email: email,
+        user_username: username.trim(),
+        user_bio: profileData?.bio || null,
+        user_avatar_url: profileData?.avatar_url || null,
+        user_campus_id: profileData?.campus_id || null,
+      })
+
+      if (profileError) {
+        console.error("Error creating profile:", profileError)
+        throw new Error("Failed to create user profile: " + profileError.message)
+      }
+
+      console.log("Profile created successfully")
 
       toast({
         title: "Account Created",
@@ -227,6 +248,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         variant: "success",
       })
 
+      // Update local state
       setUser(authData.user)
       setSession(authData.session)
       setIsAuthenticated(true)
@@ -254,7 +276,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Clear ALL Supabase-related tokens from localStorage
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i)
-        if (key && (key.startsWith("sb-") || key.includes("sb"))) {
+        if (key && (key.startsWith("supabase.") || key.includes("supabase"))) {
           console.log(`Removing local storage item: ${key}`)
           localStorage.removeItem(key)
         }
@@ -263,7 +285,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Also clear session storage
       for (let i = 0; i < sessionStorage.length; i++) {
         const key = sessionStorage.key(i)
-        if (key && (key.startsWith("sb-") || key.includes("sb"))) {
+        if (key && (key.startsWith("supabase.") || key.includes("supabase"))) {
           console.log(`Removing session storage item: ${key}`)
           sessionStorage.removeItem(key)
         }
@@ -302,7 +324,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Clear localStorage even in case of error
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i)
-        if (key && (key.startsWith("sb-") || key.includes("sb"))) {
+        if (key && (key.startsWith("supabase.") || key.includes("supabase"))) {
           console.log(`Removing local storage item: ${key}`)
           localStorage.removeItem(key)
         }
