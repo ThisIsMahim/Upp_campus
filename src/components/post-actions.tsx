@@ -59,6 +59,21 @@ export function PostActions({
         if (error) throw error
 
         onLikeChange(true)
+       // Get post author to send notification
+        const { data: postData, error: postError } = await supabase
+          .from("posts")
+          .select("user_id")
+          .eq("id", postId)
+          .single()
+
+        if (!postError && postData && postData.user_id !== user.id) {
+          // Create notification for post author
+          await supabase.rpc("send_notification", {
+            p_user_id: postData.user_id,
+            p_type: "post_like",
+            p_reference_id: postId,
+          })
+        }
       }
     } catch (error) {
       console.error("Error toggling like:", error)

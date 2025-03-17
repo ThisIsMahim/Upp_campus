@@ -8,22 +8,26 @@ import type { Profile, Campus } from "../../types"
 import { PostActions } from "../../components/post-actions"
 import { CommentsSection } from "../../components/comments-section"
 import { PostForm } from "../../components/post-form"
+import FriendRequestButton from "../../components/friend-request-button"
+import { useNavigate } from "react-router-dom"
 
 export default function FeedPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [posts, setPosts] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [userProfile, setUserProfile] = useState<Profile | null>(null)
   const [currentCampus, setCurrentCampus] = useState<Campus | null>(null)
 
-  // Inside the FeedPage component, add state for likes and comments
+  // State for likes, comments, and friend requests
   const [showComments, setShowComments] = useState<string | null>(null)
   const [postLikes, setPostLikes] = useState<Record<string, number>>({})
   const [postComments, setPostComments] = useState<Record<string, number>>({})
   const [userLikes, setUserLikes] = useState<Record<string, boolean>>({})
+  const [friendStatuses, setFriendStatuses] = useState<Record<string, string | null>>({})
 
-  // Update the useEffect that loads user profile and posts
+  // Load user profile and posts
   useEffect(() => {
     let isMounted = true
     let timeoutId: NodeJS.Timeout | null = null
@@ -97,67 +101,70 @@ export default function FeedPage() {
           console.log("Campus loaded:", campusData)
           setCurrentCampus(campusData)
 
-          // Try loading posts with a simpler query
-          try {
-            console.log("Loading posts...")
-            const { data: postsData, error: postsError } = await supabase
-              .from("posts")
-              .select("*")
-              .eq("campus_id", profile.campus_id)
-              .order("created_at", { ascending: false })
-              .limit(20) // Add a limit to prevent too much data
+          // Now load posts for this campus
+          const { data: postsData, error: postsError } = await supabase
+            .from("posts")
+            .select(`
+              *,
+              author:profiles(id, username, avatar_url),
+              likes(user_id, likeable_id),
+              comments:comments(id)
+            `)
+            .eq("campus_id", profile.campus_id)
+            .order("created_at", { ascending: false })
 
-            if (postsError) {
-              console.error("Error loading posts:", postsError)
-              throw postsError
-            }
-
-            if (!isMounted) return
-
-            if (!postsData || postsData.length === 0) {
-              console.log("No posts found")
-              setPosts([])
+          if (postsError) {
+            console.error("Error loading posts:", postsError)
+            if (isMounted) {
+              setLoadError(`Failed to load posts: ${postsError.message}`)
               setIsLoading(false)
-              if (timeoutId) clearTimeout(timeoutId)
-              return
             }
+            return
+          }
 
-            console.log("Posts loaded:", postsData.length)
+          if (!isMounted) return
 
-            // Load author data in batches
-            const userIds = [...new Set(postsData.map((post) => post.user_id))]
-            const { data: authors, error: authorsError } = await supabase
-              .from("profiles")
-              .select("id, username, avatar_url")
-              .in("id", userIds)
+          console.log("Posts loaded:", postsData.length)
+          setPosts(postsData)
 
-            if (authorsError) {
-              console.error("Error loading authors:", authorsError)
-            }
+          // Process likes and comments for each post
+          const likesMap: Record<string, number> = {}
+          const commentsMap: Record<string, number> = {}
+          const userLikesMap: Record<string, boolean> = {}
 
-            const authorMap = authors
-              ? authors.reduce((map, author) => {
-                  map[author.id] = author
-                  return map
-                }, {})
-              : {}
+          postsData.forEach((post) => {
+            likesMap[post.id] = post.likes ? post.likes.length : 0
+            commentsMap[post.id] = post.comments ? post.comments.length : 0
+            userLikesMap[post.id] = post.likes ? post.likes.some((like: any) => like.user_id === user.id) : false
+          })
 
-            // Combine the data
-            const enrichedPosts = postsData.map((post) => ({
-              ...post,
-              author: authorMap[post.user_id] || null,
-              campus: campusData,
-            }))
+          setPostLikes(likesMap)
+          setPostComments(commentsMap)
+          setUserLikes(userLikesMap)
 
-            if (isMounted) {
-              setPosts(enrichedPosts)
-            }
-          } catch (error) {
-            console.error("Error processing posts:", error)
-            if (isMounted) {
-              setLoadError(`Failed to load posts: ${error instanceof Error ? error.message : "Unknown error"}`)
+          // Check friend status for each post's author
+          const friendStatusMap: Record<string, string | null> = {}
+          for (const post of postsData) {
+            if (post.author.id !== user.id) {
+              const { data: friendData, error: friendError } = await supabase
+  .from("friend_requests")
+  .select("*")
+  .or(
+    `sender_id.eq.${user.id}.and.receiver_id.eq.${post.author.id},sender_id.eq.${post.author.id}.and.receiver_id.eq.${user.id}`
+  )
+  .limit(1);
+
+              if (friendError) {
+                console.error("Error checking friend status:", friendError)
+              } else if (friendData && friendData.length > 0) {
+                friendStatusMap[post.author.id] = friendData[0].status
+              } else {
+                friendStatusMap[post.author.id] = null
+              }
             }
           }
+
+          setFriendStatuses(friendStatusMap)
         } else {
           console.log("User has no campus selected")
         }
@@ -182,58 +189,34 @@ export default function FeedPage() {
     }
   }, [user?.id])
 
-  // Add this after loading posts in the useEffect
-  useEffect(() => {
-    const loadLikesAndComments = async () => {
-      if (!posts.length) return
+  // Handle post creation
+  const handlePostCreated = (newPost: any) => {
+    setPosts((prevPosts) => [newPost, ...prevPosts])
+  }
 
-      try {
-        // Load likes counts
-        const postIds = posts.map((post) => post.id)
-        const { data: likesData, error: likesError } = await supabase
-          .from("likes")
-          .select("likeable_id, user_id")
-          .eq("likeable_type", "post")
-          .in("likeable_id", postIds)
+  // Handle post deletion
+  const handlePostDeleted = (postId: string) => {
+    setPosts((prevPosts) => prevPosts.filter((post) => post.id !== postId))
+  }
 
-        if (likesError) throw likesError
+  // Handle like updates
+  const handleLikeUpdated = (postId: string, liked: boolean) => {
+    setUserLikes((prev) => ({ ...prev, [postId]: liked }))
+    setPostLikes((prev) => ({
+      ...prev,
+      [postId]: liked ? (prev[postId] || 0) + 1 : Math.max(0, (prev[postId] || 0) - 1),
+    }))
+  }
 
-        // Count likes per post and check user likes
-        const likesCount: Record<string, number> = {}
-        const userLiked: Record<string, boolean> = {}
+  // Handle comment count updates
+  const handleCommentCountUpdated = (postId: string, count: number) => {
+    setPostComments((prev) => ({ ...prev, [postId]: count }))
+  }
 
-        likesData?.forEach((like) => {
-          likesCount[like.likeable_id] = (likesCount[like.likeable_id] || 0) + 1
-          if (like.user_id === user?.id) {
-            userLiked[like.likeable_id] = true
-          }
-        })
-
-        setPostLikes(likesCount)
-        setUserLikes(userLiked)
-
-        // Load comments counts
-        const { data: commentsData, error: commentsError } = await supabase
-          .from("comments")
-          .select("post_id")
-          .in("post_id", postIds)
-
-        if (commentsError) throw commentsError
-
-        // Count comments per post
-        const commentsCount: Record<string, number> = {}
-        commentsData?.forEach((comment) => {
-          commentsCount[comment.post_id] = (commentsCount[comment.post_id] || 0) + 1
-        })
-
-        setPostComments(commentsCount)
-      } catch (error) {
-        console.error("Error loading likes and comments:", error)
-      }
-    }
-
-    loadLikesAndComments()
-  }, [posts, user?.id])
+  // Handle friend status updates
+  const handleFriendStatusChange = (userId: string, status: string | null) => {
+    setFriendStatuses((prev) => ({ ...prev, [userId]: status }))
+  }
 
   if (isLoading) {
     return (
@@ -251,7 +234,7 @@ export default function FeedPage() {
           <p className="text-gray-600 mb-6">{loadError}</p>
           <Button
             onClick={() => window.location.reload()}
-            className="bg-primary text-white px-4 py-2 rounded hover:bg-primary/80"
+            className="bg-primary text-black px-4 py-2 rounded hover:bg-primary/80"
           >
             Retry
           </Button>
@@ -267,7 +250,7 @@ export default function FeedPage() {
           <h1 className="text-xl font-semibold mb-4">No Campus Selected</h1>
           <p className="text-gray-600 mb-6">You need to select a campus in your profile to see posts.</p>
           <Button
-            onClick={() => (window.location.href = "/profile")}
+            onClick={() => navigate("/profile")}
             className="bg-primary text-white px-4 py-2 rounded hover:bg-primary/80"
           >
             Go to Profile
@@ -288,9 +271,7 @@ export default function FeedPage() {
         <PostForm
           userProfile={userProfile}
           currentCampus={currentCampus}
-          onPostCreated={(newPost) => {
-            setPosts((prev) => [newPost, ...prev])
-          }}
+          onPostCreated={handlePostCreated}
         />
       )}
 
@@ -308,22 +289,42 @@ export default function FeedPage() {
                   <img
                     src={post.author.avatar_url || "/placeholder.svg"}
                     alt={post.author.username}
-                    className="h-10 w-10 rounded-full object-cover mr-3"
+                    className="h-10 w-10 rounded-full object-cover mr-3 cursor-pointer"
+                    onClick={() => navigate(`/profile/${post.author.id}`)}
                     onError={(e) => {
                       e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(post.author.username)}&background=random`
                     }}
                   />
                 ) : (
-                  <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center mr-3">
+                  <div
+                    className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center mr-3 cursor-pointer"
+                    onClick={() => navigate(`/profile/${post.author.id}`)}
+                  >
                     <span className="text-lg text-gray-500">
                       {post.author?.username?.charAt(0).toUpperCase() || "?"}
                     </span>
                   </div>
                 )}
                 <div>
-                  <p className="font-semibold">{post.author?.username || "Unknown User"}</p>
+                  <p
+                    className="font-semibold cursor-pointer hover:text-indigo-600"
+                    onClick={() => navigate(`/profile/${post.author.id}`)}
+                  >
+                    {post.author?.username || "Unknown User"}
+                  </p>
                   <p className="text-xs text-gray-500">{new Date(post.created_at).toLocaleString()}</p>
                 </div>
+
+                {/* Friend Request Button */}
+                {post.author.id !== user?.id && (
+                  <div className="ml-auto">
+                    <FriendRequestButton
+                      userId={post.author.id}
+                      initialStatus={friendStatuses[post.author.id] || null}
+                      onStatusChange={(status) => handleFriendStatusChange(post.author.id, status)}
+                    />
+                  </div>
+                )}
               </div>
               <p className="text-gray-700 whitespace-pre-line">{post.content}</p>
 
@@ -332,32 +333,16 @@ export default function FeedPage() {
                 likesCount={postLikes[post.id] || 0}
                 commentsCount={postComments[post.id] || 0}
                 isLiked={!!userLikes[post.id]}
-                onLikeChange={(liked) => {
-                  setPostLikes((prev) => ({
-                    ...prev,
-                    [post.id]: (prev[post.id] || 0) + (liked ? 1 : -1),
-                  }))
-                  setUserLikes((prev) => ({
-                    ...prev,
-                    [post.id]: liked,
-                  }))
-                }}
+                onLikeChange={(liked) => handleLikeUpdated(post.id, liked)}
                 onCommentAdd={() => setShowComments(showComments === post.id ? null : post.id)}
                 canDelete={post.user_id === user?.id}
-                onDelete={() => {
-                  setPosts((prev) => prev.filter((p) => p.id !== post.id))
-                }}
+                onDelete={() => handlePostDeleted(post.id)}
               />
 
               {showComments === post.id && (
                 <CommentsSection
                   postId={post.id}
-                  onCommentCountChange={(count) => {
-                    setPostComments((prev) => ({
-                      ...prev,
-                      [post.id]: count,
-                    }))
-                  }}
+                  onCommentCountChange={(count) => handleCommentCountUpdated(post.id, count)}
                 />
               )}
             </div>
@@ -367,4 +352,3 @@ export default function FeedPage() {
     </div>
   )
 }
-

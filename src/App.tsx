@@ -17,6 +17,7 @@ import SignupForm from "./pages/auth/signup-form"
 import FeedPage from "./pages/feed/index"
 import ProfilePage from "./pages/profile/index"
 import NotFound from "./pages/404"
+import FriendsPage from "./pages/friends"
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -132,6 +133,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <ProfilePage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/friends"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <FriendsPage/>
             </Layout>
           </ProtectedRoute>
         }

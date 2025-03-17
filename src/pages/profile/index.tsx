@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useRef } from "react"
 import { useAuth } from "../../contexts/auth-context"
 import { supabase } from "../../lib/supabase"
@@ -11,6 +10,7 @@ import { Textarea } from "../../components/ui/textarea"
 import { Button } from "../../components/ui/button"
 import { toast } from "../../hooks/use-toast"
 import type { Profile, Campus } from "../../types"
+import FriendRequestButton from "../../components/friend-request-button"
 
 export default function ProfilePage() {
   const { user, session } = useAuth()
@@ -21,6 +21,9 @@ export default function ProfilePage() {
   const [isSaving, setIsSaving] = useState(false)
   const [debugInfo, setDebugInfo] = useState<any>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Friend request state
+  const [friendStatus, setFriendStatus] = useState<string | null>(null)
 
   // Campus related state
   const [campuses, setCampuses] = useState<Campus[]>([])
@@ -114,6 +117,36 @@ export default function ProfilePage() {
       setLoadError(`An unexpected error occurred: ${error instanceof Error ? error.message : "Unknown error"}`)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  // Function to check friend request status
+  const checkFriendStatus = async (profileId: string) => {
+    if (!user?.id || !profileId) return
+
+    try {
+      const { data, error } = await supabase
+        .from("friend_requests")
+        .select("*")
+        .or(
+          `(sender_id.eq.${user.id}.and.receiver_id.eq.${profileId}),(sender_id.eq.${profileId}.and.receiver_id.eq.${user.id})`,
+        )
+        .limit(1)
+
+      if (error) throw error
+
+      if (data && data.length > 0) {
+        setFriendStatus(data[0].status) // Set the friend request status
+      } else {
+        setFriendStatus(null) // No friend request exists
+      }
+    } catch (error) {
+      console.error("Error checking friend status:", error)
+      toast({
+        title: "Error",
+        description: "Failed to check friend request status",
+        variant: "destructive",
+      })
     }
   }
 
@@ -242,6 +275,11 @@ export default function ProfilePage() {
             avatar_url: data.avatar_url || "",
             campus_id: data.campus_id || "",
           })
+
+          // Check friend request status if viewing another user's profile
+          if (data.id !== user.id) {
+            checkFriendStatus(data.id)
+          }
         }
       } catch (error) {
         console.error("Unexpected error loading profile:", error)
@@ -528,6 +566,17 @@ export default function ProfilePage() {
             </div>
           )}
 
+          {/* Friend Request Button */}
+          {user?.id !== profile.id && (
+            <div className="pt-6 border-t">
+              <FriendRequestButton
+                userId={profile.id}
+                initialStatus={friendStatus}
+                onStatusChange={setFriendStatus}
+              />
+            </div>
+          )}
+
           <div className="pt-6 border-t">
             <button
               className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
@@ -718,4 +767,3 @@ export default function ProfilePage() {
     </div>
   )
 }
-

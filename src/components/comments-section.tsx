@@ -95,6 +95,22 @@ export function CommentsSection({ postId, onCommentCountChange }: CommentsSectio
       setNewComment("")
       onCommentCountChange(comments.length + 1)
 
+      // Get post author to send notification
+      const { data: postData, error: postError } = await supabase
+        .from("posts")
+        .select("user_id")
+        .eq("id", postId)
+        .single()
+
+      if (!postError && postData && postData.user_id !== user.id) {
+        // Create notification for post author
+        await supabase.rpc("send_notification", {
+          p_user_id: postData.user_id,
+          p_type: "post_comment",
+          p_reference_id: postId,
+        })
+      }
+      
       toast({
         title: "Success",
         description: "Comment added successfully",
