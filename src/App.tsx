@@ -16,6 +16,7 @@ import LoginForm from "./pages/auth/login-form"
 import SignupForm from "./pages/auth/signup-form"
 import FeedPage from "./pages/feed/index"
 import ProfilePage from "./pages/profile/index"
+import NotFound from "./pages/404"
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -135,8 +136,8 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-
-      <Route path="*" element={<Navigate to="/" replace />} />
+    {/* 404 catch-all route - must be last */}
+      <Route path="*" element={<NotFound/>} />
     </Routes>
   )
 }

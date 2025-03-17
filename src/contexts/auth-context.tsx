@@ -24,6 +24,7 @@ interface AuthContextType {
     },
   ) => Promise<void>
   signOut: () => Promise<void>
+  refreshSession: () => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -33,9 +34,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [session, setSession] = useState<Session | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [authInitialized, setAuthInitialized] = useState(false)
 
   // Use a ref to track if a sign out is in progress
   const isSigningOutRef = useRef(false)
+  // Use a ref to track ongoing refresh attempts
+  const isRefreshingRef = useRef(false)
+  // Use a ref to store the last active time
+  const lastActiveTimeRef = useRef(Date.now())
 
   // Create a stable reference to the supabase client
   const supabaseClient = supabase
@@ -47,17 +53,81 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setUser(newSession?.user || null)
     setIsAuthenticated(!!newSession)
     setIsLoading(false)
+    if (newSession) {
+      lastActiveTimeRef.current = Date.now()
+    }
   }, [])
+
+  // Function to refresh session
+  const refreshSession = useCallback(async (): Promise<boolean> => {
+    if (isRefreshingRef.current) {
+      console.log("Session refresh already in progress, skipping")
+      return false
+    }
+
+    try {
+      isRefreshingRef.current = true
+      console.log("Attempting to refresh session...")
+
+      // First try to get the current session
+      const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession()
+
+      if (sessionError) {
+        console.error("Error getting session during refresh:", sessionError)
+        throw sessionError
+      }
+
+      if (sessionData.session) {
+        console.log("Found valid session during refresh:", sessionData.session.user.id)
+        updateAuthState(sessionData.session)
+        return true
+      }
+
+      // If no session, try to refresh the token
+      console.log("No session found, attempting to refresh token...")
+      const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession()
+
+      if (refreshError) {
+        console.error("Error refreshing token:", refreshError)
+        throw refreshError
+      }
+
+      if (refreshData.session) {
+        console.log("Session refreshed successfully:", refreshData.session.user.id)
+        updateAuthState(refreshData.session)
+        return true
+      } else {
+        console.log("No session after refresh attempt")
+        updateAuthState(null)
+        return false
+      }
+    } catch (error) {
+      console.error("Session refresh failed:", error)
+      updateAuthState(null)
+      return false
+    } finally {
+      isRefreshingRef.current = false
+    }
+  }, [supabaseClient, updateAuthState])
 
   // Initialize auth state
   useEffect(() => {
     let mounted = true
+    let recoveryTimeout: NodeJS.Timeout | null = null
 
     const initializeAuth = async () => {
       try {
         console.log("Initializing auth state...")
         // Get current session
-        const { data } = await supabaseClient.auth.getSession()
+        const { data, error } = await supabaseClient.auth.getSession()
+
+        if (error) {
+          console.error("Error getting session during initialization:", error)
+          if (mounted) {
+            updateAuthState(null)
+          }
+          return
+        }
 
         if (mounted) {
           if (data.session) {
@@ -67,24 +137,40 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.log("No existing session found")
             updateAuthState(null)
           }
+          setAuthInitialized(true)
         }
       } catch (error) {
         console.error("Error initializing auth:", error)
         if (mounted) {
           updateAuthState(null)
+          setAuthInitialized(true)
         }
       }
     }
+
+    // Set up a recovery mechanism in case initialization fails
+    recoveryTimeout = setTimeout(() => {
+      if (mounted && !authInitialized) {
+        console.warn("Auth initialization timed out, forcing recovery...")
+        updateAuthState(null)
+        setAuthInitialized(true)
+      }
+    }, 5000) // 5 second timeout
 
     initializeAuth()
 
     return () => {
       mounted = false
+      if (recoveryTimeout) {
+        clearTimeout(recoveryTimeout)
+      }
     }
   }, [supabaseClient, updateAuthState])
 
-  // Set up auth state change listener
+  // Set up auth state change listener after initialization
   useEffect(() => {
+    if (!authInitialized) return
+
     console.log("Setting up auth state change listener")
 
     const {
@@ -95,6 +181,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // If we're signing out, let the signOut function handle the state update
       if (event === "SIGNED_OUT" && isSigningOutRef.current) {
         console.log("Sign out detected, letting signOut function handle state update")
+        return
+      }
+
+      // For TOKEN_REFRESHED events, just update the session but don't trigger profile creation
+      if (event === "TOKEN_REFRESHED") {
+        console.log("Token refreshed, updating session")
+        updateAuthState(newSession)
         return
       }
 
@@ -147,7 +240,44 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.log("Cleaning up auth state change listener")
       subscription.unsubscribe()
     }
-  }, [supabaseClient, updateAuthState, session])
+  }, [supabaseClient, updateAuthState, session, authInitialized])
+
+  // Session activity monitor - check session periodically
+  useEffect(() => {
+    if (!authInitialized || !isAuthenticated) return
+
+    const SESSION_CHECK_INTERVAL = 3 * 60 * 1000 // 3 minutes
+
+    const checkSession = async () => {
+      const timeSinceLastActive = Date.now() - lastActiveTimeRef.current
+
+      // If it's been more than 10 minutes since last activity, refresh session
+      if (timeSinceLastActive > 10 * 60 * 1000) {
+        console.log("Long period of inactivity detected, checking session...")
+        await refreshSession()
+      }
+
+      // Update the last active time
+      lastActiveTimeRef.current = Date.now()
+    }
+
+    const intervalId = setInterval(checkSession, SESSION_CHECK_INTERVAL)
+
+    // Also check session on visibility change (tab becomes active)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        console.log("Tab became visible, checking session...")
+        checkSession()
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+
+    return () => {
+      clearInterval(intervalId)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [authInitialized, isAuthenticated, refreshSession])
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -269,14 +399,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Update the signOut function to clear local storage tokens
   const signOut = async () => {
     try {
+      // Set the signing out flag to true to prevent the auth state listener from interfering
       isSigningOutRef.current = true
       setIsLoading(true)
       console.log("Signing out...")
 
-      // Clear ALL Supabase-related tokens from localStorage
+      // First, clear ALL Supabase-related tokens from localStorage
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i)
-        if (key && (key.startsWith("supabase.") || key.includes("supabase"))) {
+        if (key && (key.startsWith("sb-") || key.includes("supabase"))) {
           console.log(`Removing local storage item: ${key}`)
           localStorage.removeItem(key)
         }
@@ -285,13 +416,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Also clear session storage
       for (let i = 0; i < sessionStorage.length; i++) {
         const key = sessionStorage.key(i)
-        if (key && (key.startsWith("supabase.") || key.includes("supabase"))) {
+        if (key && (key.startsWith("sb-") || key.includes("supabase"))) {
           console.log(`Removing session storage item: ${key}`)
           sessionStorage.removeItem(key)
         }
       }
 
-      // Also attempt the normal sign out process
+      // Also attempt the normal sign out process with global scope
       try {
         const { error } = await supabaseClient.auth.signOut({ scope: "global" })
         if (error) {
@@ -324,7 +455,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Clear localStorage even in case of error
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i)
-        if (key && (key.startsWith("supabase.") || key.includes("supabase"))) {
+        if (key && (key.startsWith("sb-") || key.includes("supabase"))) {
           console.log(`Removing local storage item: ${key}`)
           localStorage.removeItem(key)
         }
@@ -358,6 +489,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         signIn,
         signUp,
         signOut,
+        refreshSession,
       }}
     >
       {children}
