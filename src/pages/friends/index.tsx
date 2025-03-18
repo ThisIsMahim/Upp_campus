@@ -267,192 +267,198 @@ export default function FriendsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-t-2 border-primary"></div>
-          <h2 className="text-2xl font-bold">Loading...</h2>
-          <p className="text-gray-500">Fetching your friends</p>
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-background">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto"></div>
+          <p className="text-gray-600 font-medium">Loading friends...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="min-h-[calc(100vh-4rem)] bg-background py-8 px-4">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">Friends</h1>
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">Friends</h1>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-6">
-            <TabsTrigger value="friends">Friends ({friends.length})</TabsTrigger>
-            <TabsTrigger value="pending">Requests ({pendingRequests.length})</TabsTrigger>
-            <TabsTrigger value="sent">Sent ({sentRequests.length})</TabsTrigger>
-          </TabsList>
+        <div className="bg-card rounded-xl shadow-card p-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-3 mb-6 bg-gray-100 p-1 rounded-lg">
+              <TabsTrigger 
+                value="friends"
+                className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md px-4 py-2 transition-all"
+              >
+                Friends ({friends.length})
+              </TabsTrigger>
+              <TabsTrigger value="pending">Requests ({pendingRequests.length})</TabsTrigger>
+              <TabsTrigger value="sent">Sent ({sentRequests.length})</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="friends">
-            {friends.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center">
-                <h2 className="text-xl font-semibold">No friends yet</h2>
-                <p className="mt-2 text-gray-500">
-                  You don't have any friends yet. Start by sending friend requests to other users.
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-                {friends.map((friend) => (
-                  <div key={friend.friend_id} className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="flex-shrink-0">
-                        {friend.avatar_url ? (
-                          <img
-                            src={friend.avatar_url || "/placeholder.svg"}
-                            alt={friend.username}
-                            className="h-10 w-10 rounded-full object-cover"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement
-                              target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                friend.username || "User",
-                              )}&background=random`
-                            }}
-                          />
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-300">
-                            <span className="text-sm font-medium text-gray-600">
-                              {friend.username?.charAt(0).toUpperCase() || "U"}
-                            </span>
-                          </div>
-                        )}
+            <TabsContent value="friends">
+              {friends.length === 0 ? (
+                <div className="text-center py-8">
+                  <h2 className="text-xl font-semibold text-gray-900">No friends yet</h2>
+                  <p className="mt-2 text-gray-600">
+                    You don't have any friends yet. Start by sending friend requests to other users.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3">
+                  {friends.map((friend) => (
+                    <div key={friend.friend_id} className="bg-white rounded-lg shadow-card hover:shadow-card-hover transition-shadow p-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="flex-shrink-0">
+                          {friend.avatar_url ? (
+                            <img
+                              src={friend.avatar_url || "/placeholder.svg"}
+                              alt={friend.username}
+                              className="h-10 w-10 rounded-full object-cover"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement
+                                target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                                  friend.username || "User",
+                                )}&background=random`
+                              }}
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-300">
+                              <span className="text-sm font-medium text-gray-600">
+                                {friend.username?.charAt(0).toUpperCase() || "U"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900">{friend.username}</div>
+                          <p className="text-xs text-gray-500">
+                            Friends since {new Date(friend.since).toLocaleDateString()}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900">{friend.username}</div>
-                        <p className="text-xs text-gray-500">
-                          Friends since {new Date(friend.since).toLocaleDateString()}
-                        </p>
+                      <div className="mt-4 flex justify-between">
+                        <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${friend.friend_id}`)}>
+                          View Profile
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleRemoveFriend(friend.friend_id)}>
+                          Remove
+                        </Button>
                       </div>
                     </div>
-                    <div className="mt-4 flex justify-between">
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${friend.friend_id}`)}>
-                        View Profile
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleRemoveFriend(friend.friend_id)}>
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
 
-          <TabsContent value="pending">
-            {pendingRequests.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center">
-                <h2 className="text-xl font-semibold">No pending requests</h2>
-                <p className="mt-2 text-gray-500">You don't have any pending friend requests at the moment.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {pendingRequests.map((request) => (
-                  <div key={request.id} className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="flex-shrink-0">
-                        {request.sender?.avatar_url ? (
-                          <img
-                            src={request.sender.avatar_url || "/placeholder.svg"}
-                            alt={request.sender.username}
-                            className="h-10 w-10 rounded-full object-cover"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement
-                              target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                request.sender.username || "User",
-                              )}&background=random`
-                            }}
-                          />
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-300">
-                            <span className="text-sm font-medium text-gray-600">
-                              {request.sender?.username?.charAt(0).toUpperCase() || "U"}
-                            </span>
-                          </div>
-                        )}
+            <TabsContent value="pending">
+              {pendingRequests.length === 0 ? (
+                <div className="bg-white rounded-lg shadow p-8 text-center">
+                  <h2 className="text-xl font-semibold">No pending requests</h2>
+                  <p className="mt-2 text-gray-500">You don't have any pending friend requests at the moment.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {pendingRequests.map((request) => (
+                    <div key={request.id} className="bg-white rounded-lg shadow p-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="flex-shrink-0">
+                          {request.sender?.avatar_url ? (
+                            <img
+                              src={request.sender.avatar_url || "/placeholder.svg"}
+                              alt={request.sender.username}
+                              className="h-10 w-10 rounded-full object-cover"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement
+                                target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                                  request.sender.username || "User",
+                                )}&background=random`
+                              }}
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-300">
+                              <span className="text-sm font-medium text-gray-600">
+                                {request.sender?.username?.charAt(0).toUpperCase() || "U"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900">{request.sender?.username}</div>
+                          <p className="text-xs text-gray-500">
+                            Sent {new Date(request.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900">{request.sender?.username}</div>
-                        <p className="text-xs text-gray-500">
-                          Sent {new Date(request.created_at).toLocaleDateString()}
-                        </p>
+                      <div className="mt-4 flex justify-end space-x-2">
+                        <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${request.sender_id}`)}>
+                          View Profile
+                        </Button>
+                        <Button variant="default" size="sm" onClick={() => handleAcceptRequest(request.id)}>
+                          Accept
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleRejectRequest(request.id)}>
+                          Reject
+                        </Button>
                       </div>
                     </div>
-                    <div className="mt-4 flex justify-end space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${request.sender_id}`)}>
-                        View Profile
-                      </Button>
-                      <Button variant="default" size="sm" onClick={() => handleAcceptRequest(request.id)}>
-                        Accept
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleRejectRequest(request.id)}>
-                        Reject
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
 
-          <TabsContent value="sent">
-            {sentRequests.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center">
-                <h2 className="text-xl font-semibold">No sent requests</h2>
-                <p className="mt-2 text-gray-500">You haven't sent any friend requests that are still pending.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {sentRequests.map((request) => (
-                  <div key={request.id} className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="flex-shrink-0">
-                        {request.receiver?.avatar_url ? (
-                          <img
-                            src={request.receiver.avatar_url || "/placeholder.svg"}
-                            alt={request.receiver.username}
-                            className="h-10 w-10 rounded-full object-cover"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement
-                              target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                request.receiver.username || "User",
-                              )}&background=random`
-                            }}
-                          />
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-300">
-                            <span className="text-sm font-medium text-gray-600">
-                              {request.receiver?.username?.charAt(0).toUpperCase() || "U"}
-                            </span>
-                          </div>
-                        )}
+            <TabsContent value="sent">
+              {sentRequests.length === 0 ? (
+                <div className="bg-white rounded-lg shadow p-8 text-center">
+                  <h2 className="text-xl font-semibold">No sent requests</h2>
+                  <p className="mt-2 text-gray-500">You haven't sent any friend requests that are still pending.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {sentRequests.map((request) => (
+                    <div key={request.id} className="bg-white rounded-lg shadow p-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="flex-shrink-0">
+                          {request.receiver?.avatar_url ? (
+                            <img
+                              src={request.receiver.avatar_url || "/placeholder.svg"}
+                              alt={request.receiver.username}
+                              className="h-10 w-10 rounded-full object-cover"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement
+                                target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                                  request.receiver.username || "User",
+                                )}&background=random`
+                              }}
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-300">
+                              <span className="text-sm font-medium text-gray-600">
+                                {request.receiver?.username?.charAt(0).toUpperCase() || "U"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900">{request.receiver?.username}</div>
+                          <p className="text-xs text-gray-500">
+                            Sent {new Date(request.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900">{request.receiver?.username}</div>
-                        <p className="text-xs text-gray-500">
-                          Sent {new Date(request.created_at).toLocaleDateString()}
-                        </p>
+                      <div className="mt-4 flex justify-end space-x-2">
+                        <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${request.receiver_id}`)}>
+                          View Profile
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleCancelRequest(request.id)}>
+                          Cancel Request
+                        </Button>
                       </div>
                     </div>
-                    <div className="mt-4 flex justify-end space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${request.receiver_id}`)}>
-                        View Profile
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleCancelRequest(request.id)}>
-                        Cancel Request
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
     </div>
   )

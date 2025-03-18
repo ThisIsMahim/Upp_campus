@@ -18,6 +18,7 @@ import FeedPage from "./pages/feed/index"
 import ProfilePage from "./pages/profile/index"
 import NotFound from "./pages/404"
 import FriendsPage from "./pages/friends"
+import VerifyEmail from "./pages/auth/verify-email"
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -114,6 +115,7 @@ function AppRoutes() {
         <Route index element={<Navigate to="/auth/login" replace />} />
         <Route path="login" element={<LoginForm />} />
         <Route path="signup" element={<SignupForm />} />
+        <Route path="verify-email" element={<VerifyEmail />} />
       </Route>
 
       <Route

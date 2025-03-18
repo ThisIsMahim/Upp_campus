@@ -50,9 +50,9 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="w-full max-w-md mx-auto p-6 space-y-6 bg-white rounded-lg shadow-lg border backdrop-blur-md opacity-25 hover:opacity-85 transition-all">
+    <div className="w-full max-w-md mx-auto p-6 space-y-6 bg-white rounded-lg shadow-lg border backdrop-blur-md opacity-50 hover:opacity-85 transition-all">
       <div className="text-center">
-        <h1 className="text-3xl font-bold text-primary">What's Upp Campus!!</h1>
+        <h1 className="text-3xl font-bold text-primary">What's <span className="text-blue-500">Upp Campus!!</span> </h1>
         <p className="text-sm text-muted-foreground mt-2">
           Connect with your campus community. Share, explore, and stay updated!
         </p>
@@ -107,7 +107,7 @@ export default function LoginForm() {
           </div>
         </div>
   
-        <Button type="submit" className="w-full bg-primary hover:bg-primary-dark" disabled={isSubmitting}>
+        <Button type="submit" className="w-full bg-primary hover:bg-blue-500" disabled={isSubmitting}>
           {isSubmitting ? "Signing in..." : "Sign In"}
         </Button>
       </form>

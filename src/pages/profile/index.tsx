@@ -368,27 +368,27 @@ export default function ProfilePage() {
   const currentCampus = campuses.find(c => c.id === profile.campus_id)
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="min-h-[calc(100vh-4rem)] bg-background py-8 px-4">
       <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow p-6 space-y-6">
-          <div className="flex items-center space-x-4">
+        <div className="bg-card rounded-xl shadow-card p-8 space-y-8">
+          <div className="flex items-center space-x-6">
             {profile.avatar_url ? (
               <img
                 src={profile.avatar_url}
                 alt={profile.username}
-                className="h-16 w-16 rounded-full object-cover"
+                className="h-20 w-20 rounded-full object-cover ring-2 ring-primary/10"
                 onError={(e) => {
                   e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.username)}&background=random`
                 }}
               />
             ) : (
-              <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
-                <span className="text-2xl text-gray-500">{profile.username.charAt(0).toUpperCase()}</span>
+              <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="text-3xl text-primary">{profile.username.charAt(0).toUpperCase()}</span>
               </div>
             )}
             <div>
-              <h1 className="text-2xl font-bold">{profile.username}</h1>
-              <p className="text-gray-500">{profile.email}</p>
+              <h1 className="text-3xl font-bold text-gray-900">{profile.username}</h1>
+              <p className="text-gray-600">{profile.email}</p>
             </div>
           </div>
 
@@ -424,8 +424,11 @@ export default function ProfilePage() {
           )}
 
           {user?.id === profile.id && (
-            <div className="pt-6 border-t">
-              <Button onClick={() => setIsDialogOpen(true)}>
+            <div className="pt-6 border-t border-gray-200">
+              <Button 
+                onClick={() => setIsDialogOpen(true)}
+                className="bg-primary hover:bg-primary-600 text-white transition-colors"
+              >
                 Edit Profile
               </Button>
             </div>
