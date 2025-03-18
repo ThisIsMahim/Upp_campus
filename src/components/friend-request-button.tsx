@@ -24,6 +24,7 @@ export default function FriendRequestButton({ userId, initialStatus, onStatusCha
 
     setIsLoading(true)
     try {
+      // First, insert the friend request
       const { data, error } = await supabase
         .from("friend_requests")
         .insert({
@@ -35,6 +36,19 @@ export default function FriendRequestButton({ userId, initialStatus, onStatusCha
         .single()
 
       if (error) throw error
+
+      // Then, manually create the notification
+      const { error: notificationError } = await supabase.from("notifications").insert({
+        user_id: userId,
+        type: "friend_request",
+        reference_id: data.id,
+        reference_type: "friend_request",
+      })
+
+      // Even if notification creation fails, we still consider the friend request sent
+      if (notificationError) {
+        console.warn("Failed to create notification:", notificationError)
+      }
 
       setStatus("pending")
       if (onStatusChange) onStatusChange("pending")
@@ -61,16 +75,39 @@ export default function FriendRequestButton({ userId, initialStatus, onStatusCha
 
     setIsLoading(true)
     try {
-      const { data, error } = await supabase
+      // Get the friend request ID first
+      const { data: requestData, error: requestError } = await supabase
         .from("friend_requests")
-        .update({ status: "accepted", updated_at: new Date().toISOString() })
+        .select("id")
         .eq("sender_id", userId)
         .eq("receiver_id", user.id)
         .eq("status", "pending")
+        .single()
+
+      if (requestError) throw requestError
+
+      // Update the friend request status
+      const { data, error } = await supabase
+        .from("friend_requests")
+        .update({ status: "accepted", updated_at: new Date().toISOString() })
+        .eq("id", requestData.id)
         .select()
         .single()
 
       if (error) throw error
+
+      // Manually create the notification
+      const { error: notificationError } = await supabase.from("notifications").insert({
+        user_id: userId,
+        type: "friend_accepted",
+        reference_id: data.id,
+        reference_type: "friend_request",
+      })
+
+      // Even if notification creation fails, we still consider the request accepted
+      if (notificationError) {
+        console.warn("Failed to create notification:", notificationError)
+      }
 
       setStatus("accepted")
       if (onStatusChange) onStatusChange("accepted")
@@ -167,15 +204,26 @@ export default function FriendRequestButton({ userId, initialStatus, onStatusCha
 
     setIsLoading(true)
     try {
-      const { error } = await supabase
+      // First try to delete where user is sender
+      const { error: error1 } = await supabase
         .from("friend_requests")
         .delete()
-        .or(
-          `(sender_id.eq.${user.id}.and.receiver_id.eq.${userId}),(sender_id.eq.${userId}.and.receiver_id.eq.${user.id})`,
-        )
+        .eq("sender_id", user.id)
+        .eq("receiver_id", userId)
         .eq("status", "accepted")
 
-      if (error) throw error
+      // Then try to delete where user is receiver
+      const { error: error2 } = await supabase
+        .from("friend_requests")
+        .delete()
+        .eq("sender_id", userId)
+        .eq("receiver_id", user.id)
+        .eq("status", "accepted")
+
+      if (error1 && error2) {
+        // If both failed, throw the first error
+        throw error1
+      }
 
       setStatus(null)
       if (onStatusChange) onStatusChange(null)

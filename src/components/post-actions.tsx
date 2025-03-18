@@ -68,10 +68,11 @@ export function PostActions({
 
         if (!postError && postData && postData.user_id !== user.id) {
           // Create notification for post author
-          await supabase.rpc("send_notification", {
-            p_user_id: postData.user_id,
-            p_type: "post_like",
-            p_reference_id: postId,
+          await supabase.from("notifications").insert({
+            user_id: postData.user_id,
+            type: "post_like",
+            reference_id: postId,
+            reference_type: "post",
           })
         }
       }

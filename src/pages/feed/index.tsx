@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useAuth } from "../../contexts/auth-context"
 import { supabase } from "../../lib/supabase"
 import { Button } from "../../components/ui/button"
@@ -19,175 +19,129 @@ export default function FeedPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [userProfile, setUserProfile] = useState<Profile | null>(null)
   const [currentCampus, setCurrentCampus] = useState<Campus | null>(null)
-
-  // State for likes, comments, and friend requests
   const [showComments, setShowComments] = useState<string | null>(null)
   const [postLikes, setPostLikes] = useState<Record<string, number>>({})
   const [postComments, setPostComments] = useState<Record<string, number>>({})
   const [userLikes, setUserLikes] = useState<Record<string, boolean>>({})
   const [friendStatuses, setFriendStatuses] = useState<Record<string, string | null>>({})
 
-  // Load user profile and posts
-  useEffect(() => {
-    let isMounted = true
-    let timeoutId: NodeJS.Timeout | null = null
+  // Handle session refresh
+  const handleSessionRefresh = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession()
+      if (error) throw error
+      return true
+    } catch (error) {
+      console.error("Error refreshing session:", error)
+      navigate("/auth/login")
+      return false
+    }
+  }, [navigate])
 
-    const loadUserProfileAndPosts = async () => {
-      try {
-        setIsLoading(true)
+  // Load feed data
+  const loadFeedData = useCallback(async () => {
+    if (!user?.id) return
 
-        if (!user?.id) {
-          console.log("No user ID available for feed")
-          if (isMounted) {
-            setIsLoading(false)
-          }
-          return
-        }
+    try {
+      setIsLoading(true)
+      setLoadError(null)
 
-        console.log("Loading user profile and posts for user:", user.id)
+      // Load user profile
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single()
 
-        // Set a safety timeout to prevent infinite loading
-        timeoutId = setTimeout(() => {
-          if (isMounted) {
-            console.error("Feed loading timed out after 10 seconds")
-            setLoadError("Loading timed out. Please refresh the page.")
-            setIsLoading(false)
-          }
-        }, 10000)
+      if (profileError) throw profileError
+      setUserProfile(profile)
 
-        // Load user profile first to get campus_id
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", user.id)
-          .single()
+      if (!profile.campus_id) {
+        setIsLoading(false)
+        return
+      }
 
-        if (profileError) {
-          console.error("Error loading user profile:", profileError)
-          if (isMounted) {
-            setLoadError(`Failed to load profile: ${profileError.message}`)
-            setIsLoading(false)
-          }
-          return
-        }
+      // Load campus data
+      const { data: campusData, error: campusError } = await supabase
+        .from("campuses")
+        .select("*")
+        .eq("id", profile.campus_id)
+        .single()
 
-        if (!isMounted) return
+      if (campusError) throw campusError
+      setCurrentCampus(campusData)
 
-        console.log("User profile loaded:", profile)
-        setUserProfile(profile)
+      // Load posts with proper error handling
+      const { data: postsData, error: postsError } = await supabase
+        .from("posts")
+        .select(`
+          *,
+          author:profiles(id, username, avatar_url),
+          likes(user_id, likeable_id),
+          comments:comments(id)
+        `)
+        .eq("campus_id", profile.campus_id)
+        .order("created_at", { ascending: false })
 
-        // Only load posts from user's campus
-        if (profile.campus_id) {
-          console.log("Loading posts for campus:", profile.campus_id)
+      if (postsError) throw postsError
+      setPosts(postsData)
 
-          // First, get the campus details
-          const { data: campusData, error: campusError } = await supabase
-            .from("campuses")
+      // Process post interactions
+      const likesMap: Record<string, number> = {}
+      const commentsMap: Record<string, number> = {}
+      const userLikesMap: Record<string, boolean> = {}
+
+      postsData.forEach((post) => {
+        likesMap[post.id] = post.likes?.length || 0
+        commentsMap[post.id] = post.comments?.length || 0
+        userLikesMap[post.id] = post.likes?.some((like: any) => like.user_id === user.id) || false
+      })
+
+      setPostLikes(likesMap)
+      setPostComments(commentsMap)
+      setUserLikes(userLikesMap)
+
+      // Check friend statuses with proper UUID handling
+      const friendStatusMap: Record<string, string | null> = {}
+      for (const post of postsData) {
+        if (post.author.id === user.id) continue
+
+        try {
+          const { data: friendData, error: friendError } = await supabase
+            .from("friend_requests")
             .select("*")
-            .eq("id", profile.campus_id)
-            .single()
+            .or(
+              `and(sender_id.eq.${user.id},receiver_id.eq.${post.author.id}),` +
+              `and(sender_id.eq.${post.author.id},receiver_id.eq.${user.id})`
+            )
+            .limit(1)
 
-          if (campusError) {
-            console.error("Error loading campus:", campusError)
-            if (isMounted) {
-              setLoadError(`Failed to load campus: ${campusError.message}`)
-              setIsLoading(false)
-            }
-            return
+          if (friendError) throw friendError
+          friendStatusMap[post.author.id] = friendData?.[0]?.status || null
+        } catch (error) {
+          console.error("Friend status check error:", error)
+          if (error instanceof Error && error.message.includes("JWT")) {
+            await handleSessionRefresh()
           }
-
-          if (!isMounted) return
-
-          console.log("Campus loaded:", campusData)
-          setCurrentCampus(campusData)
-
-          // Now load posts for this campus
-          const { data: postsData, error: postsError } = await supabase
-            .from("posts")
-            .select(`
-              *,
-              author:profiles(id, username, avatar_url),
-              likes(user_id, likeable_id),
-              comments:comments(id)
-            `)
-            .eq("campus_id", profile.campus_id)
-            .order("created_at", { ascending: false })
-
-          if (postsError) {
-            console.error("Error loading posts:", postsError)
-            if (isMounted) {
-              setLoadError(`Failed to load posts: ${postsError.message}`)
-              setIsLoading(false)
-            }
-            return
-          }
-
-          if (!isMounted) return
-
-          console.log("Posts loaded:", postsData.length)
-          setPosts(postsData)
-
-          // Process likes and comments for each post
-          const likesMap: Record<string, number> = {}
-          const commentsMap: Record<string, number> = {}
-          const userLikesMap: Record<string, boolean> = {}
-
-          postsData.forEach((post) => {
-            likesMap[post.id] = post.likes ? post.likes.length : 0
-            commentsMap[post.id] = post.comments ? post.comments.length : 0
-            userLikesMap[post.id] = post.likes ? post.likes.some((like: any) => like.user_id === user.id) : false
-          })
-
-          setPostLikes(likesMap)
-          setPostComments(commentsMap)
-          setUserLikes(userLikesMap)
-
-          // Check friend status for each post's author
-          const friendStatusMap: Record<string, string | null> = {}
-          for (const post of postsData) {
-            if (post.author.id !== user.id) {
-              const { data: friendData, error: friendError } = await supabase
-  .from("friend_requests")
-  .select("*")
-  .or(
-    `sender_id.eq.${user.id}.and.receiver_id.eq.${post.author.id},sender_id.eq.${post.author.id}.and.receiver_id.eq.${user.id}`
-  )
-  .limit(1);
-
-              if (friendError) {
-                console.error("Error checking friend status:", friendError)
-              } else if (friendData && friendData.length > 0) {
-                friendStatusMap[post.author.id] = friendData[0].status
-              } else {
-                friendStatusMap[post.author.id] = null
-              }
-            }
-          }
-
-          setFriendStatuses(friendStatusMap)
-        } else {
-          console.log("User has no campus selected")
-        }
-      } catch (error) {
-        console.error("Unexpected error loading feed:", error)
-        if (isMounted) {
-          setLoadError(`An unexpected error occurred: ${error instanceof Error ? error.message : "Unknown error"}`)
-        }
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId)
-        if (isMounted) {
-          setIsLoading(false)
         }
       }
-    }
 
-    loadUserProfileAndPosts()
-
-    return () => {
-      isMounted = false
-      if (timeoutId) clearTimeout(timeoutId)
+      setFriendStatuses(friendStatusMap)
+    } catch (error) {
+      console.error("Feed load error:", error)
+      setLoadError(error instanceof Error ? error.message : "Unknown error")
+      
+      if (error instanceof Error && error.message.includes("JWT")) {
+        await handleSessionRefresh()
+      }
+    } finally {
+      setIsLoading(false)
     }
-  }, [user?.id])
+  }, [user?.id, handleSessionRefresh])
+
+  useEffect(() => {
+    loadFeedData()
+  }, [loadFeedData])
 
   // Handle post creation
   const handlePostCreated = (newPost: any) => {
@@ -217,6 +171,47 @@ export default function FeedPage() {
   const handleFriendStatusChange = (userId: string, status: string | null) => {
     setFriendStatuses((prev) => ({ ...prev, [userId]: status }))
   }
+
+  // Fixed profile navigation handler
+  const handleProfileNavigation = (userId: string) => {
+    navigate(`/profile?id=${userId}`)
+  }
+
+  // Render post author section
+  const renderPostAuthor = (post: any) => (
+    <div className="flex items-center mb-4">
+      <div
+        className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center mr-3 cursor-pointer"
+        onClick={() => handleProfileNavigation(post.author.id)}
+      >
+        {post.author?.avatar_url ? (
+          <img
+            src={post.author.avatar_url}
+            alt={post.author.username}
+            className="h-full w-full rounded-full object-cover"
+            onError={(e) => {
+              e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(post.author.username)}&background=random`
+            }}
+          />
+        ) : (
+          <span className="text-lg text-gray-500">
+            {post.author?.username?.charAt(0).toUpperCase() || "?"}
+          </span>
+        )}
+      </div>
+      <div>
+        <p
+          className="font-semibold cursor-pointer hover:text-indigo-600"
+          onClick={() => handleProfileNavigation(post.author.id)}
+        >
+          {post.author?.username || "Unknown User"}
+        </p>
+        <p className="text-xs text-gray-500">
+          {new Date(post.created_at).toLocaleString()}
+        </p>
+      </div>
+    </div>
+  )
 
   if (isLoading) {
     return (
@@ -284,47 +279,19 @@ export default function FeedPage() {
         ) : (
           posts.map((post) => (
             <div key={post.id} className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center mb-4">
-                {post.author?.avatar_url ? (
-                  <img
-                    src={post.author.avatar_url || "/placeholder.svg"}
-                    alt={post.author.username}
-                    className="h-10 w-10 rounded-full object-cover mr-3 cursor-pointer"
-                    onClick={() => navigate(`/profile/${post.author.id}`)}
-                    onError={(e) => {
-                      e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(post.author.username)}&background=random`
-                    }}
-                  />
-                ) : (
-                  <div
-                    className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center mr-3 cursor-pointer"
-                    onClick={() => navigate(`/profile/${post.author.id}`)}
-                  >
-                    <span className="text-lg text-gray-500">
-                      {post.author?.username?.charAt(0).toUpperCase() || "?"}
-                    </span>
-                  </div>
-                )}
-                <div>
-                  <p
-                    className="font-semibold cursor-pointer hover:text-indigo-600"
-                    onClick={() => navigate(`/profile/${post.author.id}`)}
-                  >
-                    {post.author?.username || "Unknown User"}
-                  </p>
-                  <p className="text-xs text-gray-500">{new Date(post.created_at).toLocaleString()}</p>
-                </div>
+              <div className="flex justify-between">
+              {renderPostAuthor(post)}
 
-                {/* Friend Request Button */}
-                {post.author.id !== user?.id && (
-                  <div className="ml-auto">
-                    <FriendRequestButton
-                      userId={post.author.id}
-                      initialStatus={friendStatuses[post.author.id] || null}
-                      onStatusChange={(status) => handleFriendStatusChange(post.author.id, status)}
-                    />
-                  </div>
-                )}
+              {/* Friend Request Button */}
+              {post.author.id !== user?.id && (
+                <div className="ml-auto">
+                  <FriendRequestButton
+                    userId={post.author.id}
+                    initialStatus={friendStatuses[post.author.id] || null}
+                    onStatusChange={(status) => handleFriendStatusChange(post.author.id, status)}
+                  />
+                </div>
+              )}
               </div>
               <p className="text-gray-700 whitespace-pre-line">{post.content}</p>
 

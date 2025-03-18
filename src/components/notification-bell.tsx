@@ -22,20 +22,107 @@ export default function NotificationBell() {
     const fetchNotifications = async () => {
       try {
         setIsLoading(true)
-        const { data, error } = await supabase
+
+        // First, get the basic notification data
+        const { data: notificationsData, error: notificationsError } = await supabase
           .from("notifications")
-          .select(`
-            *,
-            sender:profiles!reference_id(id, username, avatar_url)
-          `)
+          .select("*")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(10)
 
-        if (error) throw error
+        if (notificationsError) throw notificationsError
 
-        setNotifications(data || [])
-        setUnreadCount(data?.filter((n) => !n.seen).length || 0)
+        // Process notifications to get sender information
+        const processedNotifications = await Promise.all(
+          (notificationsData || []).map(async (notification) => {
+            let senderInfo = null
+
+            // For friend requests and acceptances, get the sender from friend_requests
+            if (notification.type === "friend_request" || notification.type === "friend_accepted") {
+              if (notification.reference_type === "friend_request") {
+                const { data: requestData, error: requestError } = await supabase
+                  .from("friend_requests")
+                  .select("sender_id, receiver_id")
+                  .eq("id", notification.reference_id)
+                  .single()
+
+                if (!requestError && requestData) {
+                  // For friend_request, the sender is the sender_id
+                  // For friend_accepted, the sender is the receiver_id (who accepted the request)
+                  const senderId =
+                    notification.type === "friend_request" ? requestData.sender_id : requestData.receiver_id
+
+                  const { data: profileData, error: profileError } = await supabase
+                    .from("profiles")
+                    .select("id, username, avatar_url")
+                    .eq("id", senderId)
+                    .single()
+
+                  if (!profileError) {
+                    senderInfo = profileData
+                  }
+                }
+              }
+            }
+            // For post likes and comments, get the sender from the action
+            else if (notification.type === "post_like" || notification.type === "post_comment") {
+              if (notification.reference_type === "post") {
+                // For post likes, we need to query the likes table
+                if (notification.type === "post_like") {
+                  const { data: likeData, error: likeError } = await supabase
+                    .from("likes")
+                    .select("user_id")
+                    .eq("likeable_id", notification.reference_id)
+                    .eq("likeable_type", "post")
+                    .order("created_at", { ascending: false })
+                    .limit(1)
+
+                  if (!likeError && likeData && likeData.length > 0) {
+                    const { data: profileData, error: profileError } = await supabase
+                      .from("profiles")
+                      .select("id, username, avatar_url")
+                      .eq("id", likeData[0].user_id)
+                      .single()
+
+                    if (!profileError) {
+                      senderInfo = profileData
+                    }
+                  }
+                }
+                // For comments, get the most recent commenter
+                else if (notification.type === "post_comment") {
+                  const { data: commentData, error: commentError } = await supabase
+                    .from("comments")
+                    .select("user_id")
+                    .eq("post_id", notification.reference_id)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
+
+                  if (!commentError && commentData && commentData.length > 0) {
+                    const { data: profileData, error: profileError } = await supabase
+                      .from("profiles")
+                      .select("id, username, avatar_url")
+                      .eq("id", commentData[0].user_id)
+                      .single()
+
+                    if (!profileError) {
+                      senderInfo = profileData
+                    }
+                  }
+                }
+              }
+            }
+
+            return {
+              ...notification,
+              sender: senderInfo,
+            }
+          }),
+        )
+
+        setNotifications(processedNotifications)
+        setUnreadCount(processedNotifications.filter((n) => !n.seen).length || 0)
       } catch (error) {
         console.error("Error fetching notifications:", error)
       } finally {
@@ -114,17 +201,40 @@ export default function NotificationBell() {
     // Mark as read
     await markAsRead(notification.id)
 
-    // Navigate based on notification type
+    // Navigate based on notification type and reference_type
     switch (notification.type) {
       case "friend_request":
       case "friend_accepted":
-        navigate(`/profile/${notification.sender.id}`)
+        if (notification.reference_type === "friend_request") {
+          // Get the friend request to determine which profile to navigate to
+          const { data, error } = await supabase
+            .from("friend_requests")
+            .select("sender_id, receiver_id")
+            .eq("id", notification.reference_id)
+            .single()
+
+          if (!error && data) {
+            // Navigate to the other user's profile
+            const profileId = data.sender_id === user.id ? data.receiver_id : data.sender_id
+            navigate(`/profile?id=${profileId}`)
+          } else {
+            // Fallback to sender's profile if available
+            if (notification.sender?.id) {
+              navigate(`/profile?id=${notification.sender.id}`)
+            } else {
+              navigate("/friends")
+            }
+          }
+        } else {
+          // Fallback to friends page
+          navigate("/friends")
+        }
         break
       case "post_like":
       case "post_comment":
         // Navigate to the post
-        if (notification.post?.id) {
-          navigate(`/post/${notification.post.id}`)
+        if (notification.reference_type === "post") {
+          navigate(`/post/${notification.reference_id}`)
         } else {
           navigate("/feed")
         }

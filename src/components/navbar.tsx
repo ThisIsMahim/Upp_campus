@@ -1,7 +1,7 @@
 "use client"
 
 import { Link, useLocation } from "react-router-dom"
-import { LogOut, User, Users, Menu, X } from "lucide-react"
+import { LogOut, Menu, X } from "lucide-react"
 import { useAuth } from "../contexts/auth-context"
 import { Button } from "./ui/button"
 import NotificationBell from "./notification-bell"

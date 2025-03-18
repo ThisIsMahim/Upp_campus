@@ -1,7 +1,6 @@
 "use client"
 
-import type React from "react"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useAuth } from "../../contexts/auth-context"
 import { supabase } from "../../lib/supabase"
 import { Dialog } from "../../components/ui/dialog"
@@ -11,9 +10,11 @@ import { Button } from "../../components/ui/button"
 import { toast } from "../../hooks/use-toast"
 import type { Profile, Campus } from "../../types"
 import FriendRequestButton from "../../components/friend-request-button"
+import { useNavigate } from "react-router-dom"
 
 export default function ProfilePage() {
   const { user, session } = useAuth()
+  const navigate = useNavigate()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -21,20 +22,14 @@ export default function ProfilePage() {
   const [isSaving, setIsSaving] = useState(false)
   const [debugInfo, setDebugInfo] = useState<any>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Friend request state
   const [friendStatus, setFriendStatus] = useState<string | null>(null)
-
-  // Campus related state
   const [campuses, setCampuses] = useState<Campus[]>([])
-  const [isLoadingCampuses, setIsLoadingCampuses] = useState(true)
   const [isNewCampusDialogOpen, setIsNewCampusDialogOpen] = useState(false)
   const [newCampusData, setNewCampusData] = useState({
     name: "",
     short_name: "",
     description: "",
   })
-
   const [formData, setFormData] = useState({
     username: "",
     bio: "",
@@ -42,8 +37,95 @@ export default function ProfilePage() {
     campus_id: "",
   })
 
-  // Function to manually create a profile
-  const createProfile = async () => {
+  const handleSessionRefresh = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession()
+      if (error) throw error
+      return true
+    } catch (error) {
+      console.error("Error refreshing session:", error)
+      toast({
+        title: "Session Expired",
+        description: "Please login again",
+        variant: "destructive"
+      })
+      navigate("/auth/login")
+      return false
+    }
+  }, [navigate])
+
+  const checkFriendStatus = useCallback(async (profileId: string) => {
+    if (!user?.id || profileId === user.id) return;
+  
+    try {
+      const { data, error } = await supabase
+        .from("friend_requests")
+        .select("*")
+        .or(
+          `and(sender_id.eq.${user.id},receiver_id.eq.${profileId}),` +
+          `and(sender_id.eq.${profileId},receiver_id.eq.${user.id})`
+        )
+        .limit(1);
+  
+      if (error) throw error;
+      setFriendStatus(data?.[0]?.status || null);
+    } catch (error) {
+      console.error("Error checking friend status:", error);
+      if (error instanceof Error && error.message.includes("JWT")) {
+        await handleSessionRefresh();
+      }
+    }
+  }, [user?.id, handleSessionRefresh]);
+
+  const loadProfileData = useCallback(async (userId: string) => {
+    try {
+      setIsLoading(true)
+      
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .single()
+
+      if (profileError) throw profileError
+      
+      setProfile(profileData)
+      if (userId === user?.id) {
+        setFormData({
+          username: profileData.username || "",
+          bio: profileData.bio || "",
+          avatar_url: profileData.avatar_url || "",
+          campus_id: profileData.campus_id || ""
+        })
+      }
+
+      if (userId !== user?.id) {
+        await checkFriendStatus(userId)
+      }
+
+      const { data: campusesData, error: campusesError } = await supabase
+        .from("campuses")
+        .select("*")
+        .order("name")
+      
+      if (!campusesError && campusesData) {
+        setCampuses(campusesData)
+      }
+
+    } catch (error) {
+      console.error("Error loading profile:", error)
+      setLoadError(error instanceof Error ? error.message : "Unknown error")
+      
+      if (error instanceof Error && error.message.includes("JWT")) {
+        const refreshed = await handleSessionRefresh()
+        if (refreshed) await loadProfileData(userId)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }, [user?.id, checkFriendStatus, handleSessionRefresh])
+
+  const createProfile = useCallback(async () => {
     if (!user) {
       toast({
         title: "Error",
@@ -59,268 +141,109 @@ export default function ProfilePage() {
       const email = user.email || ""
       const campus_id = user.user_metadata?.campus_id || null
 
-      console.log("Manually creating profile with data:", {
-        id: user.id,
-        username,
-        email,
-        campus_id,
-      })
-
       const { data, error } = await supabase
         .from("profiles")
-        .upsert([
-          {
-            id: user.id,
-            username,
-            email,
-            campus_id,
-            created_at: new Date().toISOString(),
-          },
-        ])
+        .upsert([{
+          id: user.id,
+          username,
+          email,
+          campus_id,
+          created_at: new Date().toISOString(),
+        }])
         .select()
         .single()
 
-      if (error) {
-        console.error("Error creating profile:", error)
-        setLoadError(`Failed to create profile: ${error.message}`)
-        setDebugInfo({
-          error,
-          user: {
-            id: user.id,
-            email: user.email,
-            metadata: user.user_metadata,
-          },
-          session: session
-            ? {
-                expires_at: session.expires_at,
-                token_type: session.token_type,
-              }
-            : null,
-        })
-      } else {
-        console.log("Profile created successfully:", data)
-        setProfile(data)
-        setFormData({
-          username: data.username || "",
-          bio: data.bio || "",
-          avatar_url: data.avatar_url || "",
-          campus_id: data.campus_id || "",
-        })
-        toast({
-          title: "Profile Created",
-          description: "Your profile has been created successfully",
-          variant: "success",
-        })
-      }
+      if (error) throw error
+      
+      setProfile(data)
+      setFormData({
+        username: data.username || "",
+        bio: data.bio || "",
+        avatar_url: data.avatar_url || "",
+        campus_id: data.campus_id || "",
+      })
+      toast({
+        title: "Profile Created",
+        variant: "success"
+      })
     } catch (error) {
-      console.error("Unexpected error creating profile:", error)
-      setLoadError(`An unexpected error occurred: ${error instanceof Error ? error.message : "Unknown error"}`)
+      console.error("Error creating profile:", error)
+      setLoadError(`Failed to create profile: ${error instanceof Error ? error.message : "Unknown error"}`)
+      setDebugInfo({ error, user })
     } finally {
       setIsLoading(false)
     }
-  }
-
-  // Function to check friend request status
-  const checkFriendStatus = async (profileId: string) => {
-    if (!user?.id || !profileId) return
-
-    try {
-      const { data, error } = await supabase
-        .from("friend_requests")
-        .select("*")
-        .or(
-          `(sender_id.eq.${user.id}.and.receiver_id.eq.${profileId}),(sender_id.eq.${profileId}.and.receiver_id.eq.${user.id})`,
-        )
-        .limit(1)
-
-      if (error) throw error
-
-      if (data && data.length > 0) {
-        setFriendStatus(data[0].status) // Set the friend request status
-      } else {
-        setFriendStatus(null) // No friend request exists
-      }
-    } catch (error) {
-      console.error("Error checking friend status:", error)
-      toast({
-        title: "Error",
-        description: "Failed to check friend request status",
-        variant: "destructive",
-      })
-    }
-  }
+  }, [user])
 
   useEffect(() => {
-    let isMounted = true
-
-    // Clear any existing timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
+    const params = new URLSearchParams(window.location.search)
+    const userId = params.get("id") || user?.id
+    
+    if (userId) {
+      loadProfileData(userId)
+    } else {
+      setLoadError("No user specified")
+      setIsLoading(false)
     }
+  }, [user?.id, loadProfileData])
 
-    async function loadCampuses() {
-      try {
-        setIsLoadingCampuses(true)
-        const { data, error } = await supabase.from("campuses").select("*").order("name")
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!user || !profile) return
 
-        if (error) throw error
-
-        if (isMounted) {
-          setCampuses(data || [])
-        }
-      } catch (error) {
-        console.error("Error loading campuses:", error)
-      } finally {
-        if (isMounted) {
-          setIsLoadingCampuses(false)
-        }
-      }
-    }
-
-    async function loadProfile() {
-      try {
-        if (!user?.id) {
-          console.log("No user ID available for profile fetch")
-          if (isMounted) {
-            setIsLoading(false)
-            setLoadError("User not authenticated")
-          }
-          return
-        }
-
-        console.log("Fetching profile for user:", user.id)
-        console.log("Auth state:", {
-          isAuthenticated: !!session,
-          userId: user.id,
-          email: user.email,
-          sessionExpiresAt: session?.expires_at,
-        })
-
-        // Set a timeout to prevent infinite loading
-        timeoutRef.current = setTimeout(() => {
-          if (isMounted && isLoading) {
-            console.log("Profile fetch timed out after 10 seconds")
-            setIsLoading(false)
-            setLoadError("Request timed out. The server might be slow or unavailable.")
-            setDebugInfo({
-              user: {
-                id: user.id,
-                email: user.email,
-                metadata: user.user_metadata,
-              },
-              session: session
-                ? {
-                    expires_at: session.expires_at,
-                    token_type: session.token_type,
-                  }
-                : null,
-              timeoutAt: new Date().toISOString(),
-            })
-          }
-        }, 10000) // 10 second timeout
-
-        // Test the connection to Supabase
-        const { data: connectionTest, error: connectionError } = await supabase
+    try {
+      setIsSaving(true)
+      
+      if (formData.username !== profile.username) {
+        const { count } = await supabase
           .from("profiles")
-          .select("count")
-          .limit(1)
+          .select("*", { count: "exact", head: true })
+          .eq("username", formData.username)
+          .neq("id", user.id)
 
-        if (connectionError) {
-          console.error("Connection test failed:", connectionError)
-          if (isMounted) {
-            setLoadError(`Connection to database failed: ${connectionError.message}`)
-            setDebugInfo({ connectionError })
-          }
-          return
-        }
-
-        console.log("Connection test successful:", connectionTest)
-
-        // Now try to fetch the actual profile
-        const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single()
-
-        // Clear the timeout since we got a response
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current)
-          timeoutRef.current = null
-        }
-
-        if (error) {
-          console.error("Error fetching profile:", error)
-          if (isMounted) {
-            setLoadError(`Failed to load profile: ${error.message}`)
-            setDebugInfo({
-              error,
-              user: {
-                id: user.id,
-                email: user.email,
-                metadata: user.user_metadata,
-              },
-              session: session
-                ? {
-                    expires_at: session.expires_at,
-                    token_type: session.token_type,
-                  }
-                : null,
-            })
-          }
-        } else if (isMounted) {
-          console.log("Profile loaded successfully:", data)
-          setProfile(data)
-
-          // Initialize form data with profile data
-          setFormData({
-            username: data.username || "",
-            bio: data.bio || "",
-            avatar_url: data.avatar_url || "",
-            campus_id: data.campus_id || "",
-          })
-
-          // Check friend request status if viewing another user's profile
-          if (data.id !== user.id) {
-            checkFriendStatus(data.id)
-          }
-        }
-      } catch (error) {
-        console.error("Unexpected error loading profile:", error)
-        if (isMounted) {
-          setLoadError(`An unexpected error occurred: ${error instanceof Error ? error.message : "Unknown error"}`)
-          setDebugInfo({ unexpectedError: error })
-        }
-      } finally {
-        if (isMounted) {
-          // Always set loading to false, even if there was an error
-          setIsLoading(false)
+        if (count && count > 0) {
+          throw new Error("Username already taken")
         }
       }
-    }
 
-    loadCampuses()
-    loadProfile()
-
-    return () => {
-      isMounted = false
-      // Clear timeout on unmount
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
+      const updates = {
+        username: formData.username,
+        bio: formData.bio || null,
+        avatar_url: formData.avatar_url || null,
+        campus_id: formData.campus_id,
+        updated_at: new Date().toISOString(),
       }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .update(updates)
+        .eq("id", user.id)
+        .select()
+        .single()
+
+      if (error) throw error
+      
+      setProfile(data)
+      setIsDialogOpen(false)
+      toast({
+        title: "Profile Updated",
+        variant: "success"
+      })
+
+    } catch (error) {
+      console.error("Update error:", error)
+      toast({
+        title: "Update Failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive"
+      })
+      
+      if (error instanceof Error && error.message.includes("JWT")) {
+        await handleSessionRefresh()
+      }
+    } finally {
+      setIsSaving(false)
     }
-  }, [user, session])
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }))
-  }
-
-  const handleNewCampusChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target
-    setNewCampusData((prev) => ({
-      ...prev,
-      [name]: value,
-    }))
   }
 
   const handleCreateCampus = async (e: React.FormEvent) => {
@@ -340,40 +263,33 @@ export default function ProfilePage() {
 
       const { data, error } = await supabase
         .from("campuses")
-        .insert([
-          {
-            name: newCampusData.name,
-            short_name: newCampusData.short_name || null,
-            description: newCampusData.description || null,
-            created_by: user?.id || null,
-          },
-        ])
+        .insert([{
+          name: newCampusData.name,
+          short_name: newCampusData.short_name || null,
+          description: newCampusData.description || null,
+          created_by: user?.id || null,
+        }])
         .select()
         .single()
 
-      if (error) {
-        throw error
-      }
-
-      // Add the new campus to the list and select it
-      setCampuses((prev) => [...prev, data])
-      setFormData((prev) => ({
+      if (error) throw error
+      
+      setCampuses(prev => [...prev, data])
+      setFormData(prev => ({
         ...prev,
         campus_id: data.id,
       }))
-
-      toast({
-        title: "Campus Created",
-        description: `${newCampusData.name} has been added successfully.`,
-        variant: "success",
-      })
-
       setIsNewCampusDialogOpen(false)
       setNewCampusData({
         name: "",
         short_name: "",
         description: "",
       })
+      toast({
+        title: "Campus Created",
+        variant: "success"
+      })
+
     } catch (error) {
       console.error("Error creating campus:", error)
       toast({
@@ -386,75 +302,14 @@ export default function ProfilePage() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target
+    setFormData(prev => ({ ...prev, [name]: value }))
+  }
 
-    if (!user?.id || !profile) return
-
-    try {
-      setIsSaving(true)
-
-      // Validate username and campus
-      if (!formData.username.trim()) {
-        toast({
-          title: "Error",
-          description: "Username cannot be empty",
-          variant: "destructive",
-        })
-        return
-      }
-
-      if (!formData.campus_id) {
-        toast({
-          title: "Error",
-          description: "Please select a campus",
-          variant: "destructive",
-        })
-        return
-      }
-
-      const updates = {
-        username: formData.username,
-        bio: formData.bio || null,
-        avatar_url: formData.avatar_url || null,
-        campus_id: formData.campus_id,
-        updated_at: new Date().toISOString(),
-      }
-
-      console.log("Updating profile:", updates)
-
-      const { error } = await supabase.from("profiles").update(updates).eq("id", user.id)
-
-      if (error) {
-        console.error("Error updating profile:", error)
-        throw error
-      }
-
-      console.log("Profile updated successfully")
-
-      // Update local profile state
-      setProfile({
-        ...profile,
-        ...updates,
-      })
-
-      toast({
-        title: "Profile Updated",
-        description: "Your profile has been successfully updated",
-        variant: "success",
-      })
-
-      setIsDialogOpen(false)
-    } catch (error) {
-      console.error("Error in handleSubmit:", error)
-      toast({
-        title: "Update Failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSaving(false)
-    }
+  const handleNewCampusChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target
+    setNewCampusData(prev => ({ ...prev, [name]: value }))
   }
 
   if (isLoading) {
@@ -462,7 +317,6 @@ export default function ProfilePage() {
       <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] p-4">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mb-4"></div>
         <p className="text-gray-500">Loading profile...</p>
-        <p className="text-gray-400 text-sm mt-2">This may take a moment...</p>
       </div>
     )
   }
@@ -475,21 +329,17 @@ export default function ProfilePage() {
             <h1 className="text-xl font-semibold text-red-600 mb-2">Error Loading Profile</h1>
             <p className="text-gray-600 mb-4">{loadError}</p>
             <div className="flex flex-col sm:flex-row justify-center gap-2 mb-6">
-              <Button
-                onClick={() => window.location.reload()}
-                className="bg-primary text-white px-4 py-2 rounded hover:bg-primary/80"
-              >
+              <Button onClick={() => window.location.reload()} className="bg-primary hover:bg-primary/80">
                 Retry
               </Button>
-              <Button onClick={createProfile} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
-                Create Profile Manually
+              <Button onClick={createProfile} className="bg-green-600 hover:bg-green-700">
+                Create Profile
               </Button>
             </div>
-
             {debugInfo && (
               <div className="mt-8 text-left">
                 <h2 className="text-lg font-semibold mb-2">Debug Information</h2>
-                <div className="bg-gray-100 p-4 rounded overflow-auto max-h-60">
+                <div className="bg-gray-100 p-4 rounded max-h-60 overflow-auto">
                   <pre className="text-xs">{JSON.stringify(debugInfo, null, 2)}</pre>
                 </div>
               </div>
@@ -506,8 +356,7 @@ export default function ProfilePage() {
         <div className="max-w-2xl mx-auto bg-white rounded-lg shadow p-6">
           <div className="text-center">
             <h1 className="text-xl font-semibold mb-4">No Profile Found</h1>
-            <p className="text-gray-600 mb-6">We couldn't find your profile. Would you like to create one?</p>
-            <Button onClick={createProfile} className="bg-primary text-white px-4 py-2 rounded hover:bg-primary/80">
+            <Button onClick={createProfile} className="bg-primary hover:bg-primary/80">
               Create Profile
             </Button>
           </div>
@@ -516,7 +365,7 @@ export default function ProfilePage() {
     )
   }
 
-  const currentCampus = campuses.find((c) => c.id === profile.campus_id)
+  const currentCampus = campuses.find(c => c.id === profile.campus_id)
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -525,7 +374,7 @@ export default function ProfilePage() {
           <div className="flex items-center space-x-4">
             {profile.avatar_url ? (
               <img
-                src={profile.avatar_url || "/placeholder.svg"}
+                src={profile.avatar_url}
                 alt={profile.username}
                 className="h-16 w-16 rounded-full object-cover"
                 onError={(e) => {
@@ -559,14 +408,11 @@ export default function ProfilePage() {
                     {currentCampus.name}
                     {currentCampus.short_name && ` (${currentCampus.short_name})`}
                   </>
-                ) : (
-                  "Unknown Campus"
-                )}
+                ) : "Unknown Campus"}
               </p>
             </div>
           )}
 
-          {/* Friend Request Button */}
           {user?.id !== profile.id && (
             <div className="pt-6 border-t">
               <FriendRequestButton
@@ -577,20 +423,18 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div className="pt-6 border-t">
-            <button
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-              onClick={() => setIsDialogOpen(true)}
-            >
-              Edit Profile
-            </button>
-          </div>
+          {user?.id === profile.id && (
+            <div className="pt-6 border-t">
+              <Button onClick={() => setIsDialogOpen(true)}>
+                Edit Profile
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Edit Profile Dialog */}
       <Dialog isOpen={isDialogOpen} onClose={() => setIsDialogOpen(false)} title="Edit Profile">
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleProfileUpdate} className="space-y-4">
           <div className="space-y-2">
             <label htmlFor="username" className="text-sm font-medium">
               Username<span className="text-red-500">*</span>
@@ -598,10 +442,8 @@ export default function ProfilePage() {
             <Input
               id="username"
               name="username"
-              type="text"
               value={formData.username}
               onChange={handleChange}
-              placeholder="johndoe"
               required
             />
           </div>
@@ -618,16 +460,15 @@ export default function ProfilePage() {
                 onChange={handleChange}
                 className="w-full p-2 border rounded-md"
                 required
-                disabled={isLoadingCampuses}
               >
                 <option value="">Select a campus</option>
-                {campuses.map((campus) => (
+                {campuses.map(campus => (
                   <option key={campus.id} value={campus.id}>
-                    {campus.name} {campus.short_name ? `(${campus.short_name})` : ""}
+                    {campus.name} {campus.short_name && `(${campus.short_name})`}
                   </option>
                 ))}
               </select>
-              <Button type="button" onClick={() => setIsNewCampusDialogOpen(true)} className="whitespace-nowrap">
+              <Button type="button" onClick={() => setIsNewCampusDialogOpen(true)}>
                 Add New
               </Button>
             </div>
@@ -635,30 +476,24 @@ export default function ProfilePage() {
 
           <div className="space-y-2">
             <label htmlFor="avatar_url" className="text-sm font-medium">
-              Avatar URL (optional)
+              Avatar URL
             </label>
             <Input
               id="avatar_url"
               name="avatar_url"
               type="url"
-              value={formData.avatar_url || ""}
+              value={formData.avatar_url}
               onChange={handleChange}
               placeholder="https://example.com/avatar.jpg"
             />
             {formData.avatar_url && (
               <div className="mt-2">
-                <p className="text-sm text-gray-500 mb-1">Preview:</p>
                 <img
-                  src={formData.avatar_url || "/placeholder.svg"}
+                  src={formData.avatar_url}
                   alt="Avatar preview"
                   className="h-16 w-16 rounded-full object-cover"
                   onError={(e) => {
                     e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(formData.username)}&background=random`
-                    toast({
-                      title: "Invalid Image URL",
-                      description: "Using a generated avatar instead",
-                      variant: "warning",
-                    })
                   }}
                 />
               </div>
@@ -667,39 +502,33 @@ export default function ProfilePage() {
 
           <div className="space-y-2">
             <label htmlFor="bio" className="text-sm font-medium">
-              Bio (optional)
+              Bio
             </label>
             <Textarea
               id="bio"
               name="bio"
-              value={formData.bio || ""}
+              value={formData.bio}
               onChange={handleChange}
-              placeholder="Tell us about yourself..."
               rows={3}
             />
           </div>
 
-          <div className="flex space-x-2 pt-4">
+          <div className="flex gap-2 pt-4">
             <Button
               type="button"
-              className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+              variant="outline"
               onClick={() => setIsDialogOpen(false)}
               disabled={isSaving}
             >
               Cancel
             </Button>
-            <Button
-              type="submit"
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-              disabled={isSaving}
-            >
+            <Button type="submit" disabled={isSaving}>
               {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </form>
       </Dialog>
 
-      {/* New Campus Dialog */}
       <Dialog isOpen={isNewCampusDialogOpen} onClose={() => setIsNewCampusDialogOpen(false)} title="Add New Campus">
         <form onSubmit={handleCreateCampus} className="space-y-4">
           <div className="space-y-2">
@@ -709,56 +538,47 @@ export default function ProfilePage() {
             <Input
               id="name"
               name="name"
-              type="text"
               value={newCampusData.name}
               onChange={handleNewCampusChange}
-              placeholder="e.g. Harvard University"
               required
             />
           </div>
 
           <div className="space-y-2">
             <label htmlFor="short_name" className="text-sm font-medium">
-              Short Name/Abbreviation (optional)
+              Short Name
             </label>
             <Input
               id="short_name"
               name="short_name"
-              type="text"
               value={newCampusData.short_name}
               onChange={handleNewCampusChange}
-              placeholder="e.g. HU"
             />
           </div>
 
           <div className="space-y-2">
             <label htmlFor="description" className="text-sm font-medium">
-              Description (optional)
+              Description
             </label>
             <Textarea
               id="description"
               name="description"
               value={newCampusData.description}
               onChange={handleNewCampusChange}
-              placeholder="Brief description of the campus..."
               rows={3}
             />
           </div>
 
-          <div className="flex space-x-2 pt-4">
+          <div className="flex gap-2 pt-4">
             <Button
               type="button"
-              className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+              variant="outline"
               onClick={() => setIsNewCampusDialogOpen(false)}
               disabled={isSaving}
             >
               Cancel
             </Button>
-            <Button
-              type="submit"
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-              disabled={isSaving}
-            >
+            <Button type="submit" disabled={isSaving}>
               {isSaving ? "Creating..." : "Create Campus"}
             </Button>
           </div>

@@ -218,15 +218,26 @@ export default function FriendsPage() {
 
   const handleRemoveFriend = async (friendId: string) => {
     try {
-      const { error } = await supabase
+      // First try to delete where user is sender
+      const { error: error1 } = await supabase
         .from("friend_requests")
         .delete()
-        .or(
-          `(sender_id.eq.${user?.id}.and.receiver_id.eq.${friendId}),(sender_id.eq.${friendId}.and.receiver_id.eq.${user?.id})`,
-        )
+        .eq("sender_id", user?.id)
+        .eq("receiver_id", friendId)
         .eq("status", "accepted")
 
-      if (error) throw error
+      // Then try to delete where user is receiver
+      const { error: error2 } = await supabase
+        .from("friend_requests")
+        .delete()
+        .eq("sender_id", friendId)
+        .eq("receiver_id", user?.id)
+        .eq("status", "accepted")
+
+      if (error1 && error2) {
+        // If both failed, throw the first error
+        throw error1
+      }
 
       // Update local state
       setFriends((prev) => prev.filter((friend) => friend.friend_id !== friendId))
@@ -320,7 +331,7 @@ export default function FriendsPage() {
                       </div>
                     </div>
                     <div className="mt-4 flex justify-between">
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile/${friend.friend_id}`)}>
+                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${friend.friend_id}`)}>
                         View Profile
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleRemoveFriend(friend.friend_id)}>
@@ -373,7 +384,7 @@ export default function FriendsPage() {
                       </div>
                     </div>
                     <div className="mt-4 flex justify-end space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile/${request.sender_id}`)}>
+                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${request.sender_id}`)}>
                         View Profile
                       </Button>
                       <Button variant="default" size="sm" onClick={() => handleAcceptRequest(request.id)}>
@@ -429,7 +440,7 @@ export default function FriendsPage() {
                       </div>
                     </div>
                     <div className="mt-4 flex justify-end space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile/${request.receiver_id}`)}>
+                      <Button variant="outline" size="sm" onClick={() => navigate(`/profile?id=${request.receiver_id}`)}>
                         View Profile
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleCancelRequest(request.id)}>
