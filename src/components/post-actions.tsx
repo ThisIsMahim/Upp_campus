@@ -59,7 +59,8 @@ export function PostActions({
         if (error) throw error
 
         onLikeChange(true)
-       // Get post author to send notification
+
+        // Get post author to send notification
         const { data: postData, error: postError } = await supabase
           .from("posts")
           .select("user_id")
@@ -67,13 +68,17 @@ export function PostActions({
           .single()
 
         if (!postError && postData && postData.user_id !== user.id) {
-          // Create notification for post author
-          await supabase.from("notifications").insert({
+          const { error: notificationError } = await supabase.from("notifications").insert({
             user_id: postData.user_id,
             type: "post_like",
             reference_id: postId,
             reference_type: "post",
+            seen: false  // explicitly set seen status
           })
+          
+          if (notificationError) {
+            console.error("Error creating like notification:", notificationError)
+          }
         }
       }
     } catch (error) {

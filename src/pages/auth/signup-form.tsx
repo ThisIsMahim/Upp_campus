@@ -222,7 +222,16 @@ export default function SignupForm() {
         avatar_url: updatedFormData.avatar_url || null,
         campus_id: updatedFormData.campus_id,
       })
-      // The redirect will happen in the useEffect above
+
+      // Show verification message
+      toast({
+        title: "Account Created",
+        description: "Please check your email to verify your account. You won't be able to post or use features until your email is verified.",
+        variant: "default",
+      })
+
+      // Navigate to a verification pending page or login page
+      navigate("/auth/verify-email")
     } catch (error) {
       console.error("Signup error:", error)
       // Error is already handled in the auth context

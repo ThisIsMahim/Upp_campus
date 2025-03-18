@@ -103,13 +103,21 @@ export function CommentsSection({ postId, onCommentCountChange }: CommentsSectio
         .single()
 
       if (!postError && postData && postData.user_id !== user.id) {
-        // Create notification for post author
-        await supabase.from("notifications").insert({
-          user_id: postData.user_id,
-          type: "post_comment",
-          reference_id: postId,
-          reference_type: "post",
-        })
+        try {
+          const { error: notificationError } = await supabase.from("notifications").insert({
+            user_id: postData.user_id,
+            type: "post_comment",
+            reference_id: postId,
+            reference_type: "post",
+            seen: false  // explicitly set seen status
+          })
+          
+          if (notificationError) {
+            console.error("Error creating notification:", notificationError)
+          }
+        } catch (error) {
+          console.error("Error creating comment notification:", error)
+        }
       }
       
       toast({
