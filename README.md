@@ -24,6 +24,28 @@ A modern, feature-rich social platform built for university students using React
   - Beautiful UI components with Tailwind CSS
   - Dark/Light mode support
 
+
+## 🖼️ Showcase
+
+Here are some screenshots showcasing the key features of UPP Campus:
+
+### Authentication
+![Login Page](showcase/login-page.png)
+*Clean and modern login interface with email and password authentication*
+
+### News Feed
+![News Feed](showcase/news-feed.png)
+*Dynamic news feed showing posts from friends and campus events*
+
+### User Profile
+![User Profile](showcase/user-profile.png)
+*Detailed user profile page with activity history and friend connections*
+
+### Friends Section
+![Friends Page](showcase/friends-page.png)
+*Interactive friends page showing connections and friend suggestions*
+
+
 ## 🚀 Tech Stack
 
 - **Frontend Framework**: React 18 with TypeScript
@@ -101,28 +123,6 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ## 🚀 Deployment
 
 This project is configured for deployment on Vercel. Simply connect your GitHub repository to Vercel and it will automatically deploy your application.
-
-## 🖼️ Showcase
-
-Here are some screenshots showcasing the key features of UPP Campus:
-
-### Authentication
-![Login Page](showcase/login-page.png)
-*Clean and modern login interface with email and password authentication*
-
-### News Feed
-![News Feed](showcase/news-feed.png)
-*Dynamic news feed showing posts from friends and campus events*
-
-### User Profile
-![User Profile](showcase/user-profile.png)
-*Detailed user profile page with activity history and friend connections*
-
-### Friends Section
-![Friends Page](showcase/friends-page.png)
-*Interactive friends page showing connections and friend suggestions*
-
-
 
 ## 🤝 Contributing
 
