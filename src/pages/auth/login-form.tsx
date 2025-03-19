@@ -50,7 +50,7 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="w-full max-w-md mx-auto p-6 space-y-6 bg-white rounded-lg shadow-lg border backdrop-blur-md opacity-50 hover:opacity-85 transition-all">
+    <div className="w-full max-w-md mx-auto p-6 space-y-6 bg-white rounded-lg shadow-lg border backdrop-blur-lg opacity-90 hover:opacity-95 transition-all">
       <div className="text-center">
         <h1 className="text-3xl font-bold text-primary">What's <span className="text-blue-500">Upp Campus!!</span> </h1>
         <p className="text-sm text-muted-foreground mt-2">
